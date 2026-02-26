@@ -242,10 +242,12 @@ func installBinary(baseDir, owner, repo, tag, binName string, src *os.File) (_ s
 	return linkPath, nil
 }
 
+var apiBase = "https://api.github.com"
+
 func fetchRelease(owner, repo, tag string) (Release, error) {
-	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", owner, repo)
+	url := fmt.Sprintf("%s/repos/%s/%s/releases/latest", apiBase, owner, repo)
 	if tag != "" {
-		url = fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/tags/%s", owner, repo, tag)
+		url = fmt.Sprintf("%s/repos/%s/%s/releases/tags/%s", apiBase, owner, repo, tag)
 	}
 
 	req, err := http.NewRequest("GET", url, nil)
