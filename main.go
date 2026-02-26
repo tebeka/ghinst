@@ -403,24 +403,34 @@ func buildVersion() string {
 		return "unknown"
 	}
 
-	return info.Main.Version
+	v := info.Main.Version
+	// Pseudo-versions embed a git hash (v0.0.0-YYYYMMDDHHMMSS-abcdef123456);
+	// strip everything after the timestamp.
+	if parts := strings.SplitN(v, "-", 3); len(parts) == 3 {
+		v = parts[0]
+	}
+
+	return v
+}
+
+var options struct {
+	showVersion bool
+	doPurge     bool
+	baseDir     string
 }
 
 func main() {
-	var showVersion bool
-	var doPurge bool
-	var baseDir string
-	flag.BoolVar(&showVersion, "version", false, "print version and exit")
-	flag.BoolVar(&doPurge, "purge", false, "remove all but the latest installed version of owner/repo")
-	flag.StringVar(&baseDir, "dir", defaultBaseDir(), "base install directory (overrides GHINST_DIR)")
+	flag.BoolVar(&options.showVersion, "version", false, "print version and exit")
+	flag.BoolVar(&options.doPurge, "purge", false, "remove all but the latest installed version of owner/repo")
+	flag.StringVar(&options.baseDir, "dir", defaultBaseDir(), "base install directory (overrides GHINST_DIR)")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: %s owner/repo[@version]\n", filepath.Base(os.Args[0]))
 		flag.PrintDefaults()
 	}
 	flag.Parse()
 
-	if showVersion {
-		fmt.Println(buildVersion())
+	if options.showVersion {
+		fmt.Printf("%s %s\n", filepath.Base(os.Args[0]), buildVersion())
 		return
 	}
 
@@ -435,8 +445,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	if doPurge {
-		if err := purge(baseDir, owner, repo); err != nil {
+	if options.doPurge {
+		if err := purge(options.baseDir, owner, repo); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
 		}
@@ -475,7 +485,7 @@ func main() {
 	defer os.Remove(binFile.Name())
 	defer binFile.Close()
 
-	linkPath, err := installBinary(baseDir, owner, repo, release.TagName, binName, binFile)
+	linkPath, err := installBinary(options.baseDir, owner, repo, release.TagName, binName, binFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: installing: %v\n", err)
 		os.Exit(1)
