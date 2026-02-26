@@ -353,62 +353,43 @@ func defaultBaseDir() string {
 	return filepath.Join(home, ".local")
 }
 
-// purge removes all but the most recently installed version of each tool.
-func purge(baseDir string) error {
-	storeDir := filepath.Join(baseDir, "ghinst")
+// purge removes all but the most recently installed version of owner/repo.
+func purge(baseDir, owner, repo string) error {
+	ownerDir := filepath.Join(baseDir, "ghinst", owner)
 
-	owners, err := os.ReadDir(storeDir)
-	if os.IsNotExist(err) {
-		return nil
-	}
+	entries, err := os.ReadDir(ownerDir)
 	if err != nil {
 		return err
 	}
 
-	for _, owner := range owners {
-		if !owner.IsDir() {
+	var versions []os.DirEntry
+	for _, e := range entries {
+		if !e.IsDir() {
 			continue
 		}
+		name, _, found := strings.Cut(e.Name(), "@")
+		if found && name == repo {
+			versions = append(versions, e)
+		}
+	}
 
-		ownerDir := filepath.Join(storeDir, owner.Name())
-		entries, err := os.ReadDir(ownerDir)
-		if err != nil {
+	if len(versions) <= 1 {
+		return nil
+	}
+
+	// Sort by modification time, keep the newest.
+	sort.Slice(versions, func(i, j int) bool {
+		iInfo, _ := versions[i].Info()
+		jInfo, _ := versions[j].Info()
+		return iInfo.ModTime().Before(jInfo.ModTime())
+	})
+
+	for _, v := range versions[:len(versions)-1] {
+		dir := filepath.Join(ownerDir, v.Name())
+		if err := os.RemoveAll(dir); err != nil {
 			return err
 		}
-
-		// Group repo@version dirs by repo name.
-		repoVersions := make(map[string][]os.DirEntry)
-		for _, e := range entries {
-			if !e.IsDir() {
-				continue
-			}
-			repo, _, found := strings.Cut(e.Name(), "@")
-			if !found {
-				continue
-			}
-			repoVersions[repo] = append(repoVersions[repo], e)
-		}
-
-		for _, versions := range repoVersions {
-			if len(versions) <= 1 {
-				continue
-			}
-
-			// Sort by modification time, keep the newest.
-			sort.Slice(versions, func(i, j int) bool {
-				iInfo, _ := versions[i].Info()
-				jInfo, _ := versions[j].Info()
-				return iInfo.ModTime().Before(jInfo.ModTime())
-			})
-
-			for _, v := range versions[:len(versions)-1] {
-				dir := filepath.Join(ownerDir, v.Name())
-				if err := os.RemoveAll(dir); err != nil {
-					return err
-				}
-				fmt.Printf("purged %s/%s\n", owner.Name(), v.Name())
-			}
-		}
+		fmt.Printf("purged %s/%s\n", owner, v.Name())
 	}
 
 	return nil
@@ -428,7 +409,7 @@ func main() {
 	var doPurge bool
 	var baseDir string
 	flag.BoolVar(&showVersion, "version", false, "print version and exit")
-	flag.BoolVar(&doPurge, "purge", false, "remove all but the latest version of each installed tool")
+	flag.BoolVar(&doPurge, "purge", false, "remove all but the latest installed version of owner/repo")
 	flag.StringVar(&baseDir, "dir", defaultBaseDir(), "base install directory (overrides GHINST_DIR)")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: %s owner/repo[@version]\n", filepath.Base(os.Args[0]))
@@ -441,14 +422,6 @@ func main() {
 		return
 	}
 
-	if doPurge {
-		if err := purge(baseDir); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-		return
-	}
-
 	if flag.NArg() != 1 {
 		flag.Usage()
 		os.Exit(1)
@@ -458,6 +431,14 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
+	}
+
+	if doPurge {
+		if err := purge(baseDir, owner, repo); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		return
 	}
 
 	release, err := fetchRelease(owner, repo, tag)
