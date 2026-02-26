@@ -16,6 +16,7 @@ import (
 	"runtime/debug"
 	"sort"
 	"strings"
+	"time"
 )
 
 type Release struct {
@@ -221,6 +222,11 @@ func installBinary(baseDir, owner, repo, tag, binName string, src *os.File) (_ s
 	if _, err := io.Copy(dst, src); err != nil {
 		return "", err
 	}
+	dst.Close()
+
+	// Touch the install dir so purge can sort by most recently installed.
+	now := time.Now()
+	os.Chtimes(installDir, now, now)
 
 	linkDir := filepath.Join(baseDir, "bin")
 	if err := os.MkdirAll(linkDir, 0755); err != nil {
@@ -347,6 +353,67 @@ func defaultBaseDir() string {
 	return filepath.Join(home, ".local")
 }
 
+// purge removes all but the most recently installed version of each tool.
+func purge(baseDir string) error {
+	storeDir := filepath.Join(baseDir, "ghinst")
+
+	owners, err := os.ReadDir(storeDir)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	for _, owner := range owners {
+		if !owner.IsDir() {
+			continue
+		}
+
+		ownerDir := filepath.Join(storeDir, owner.Name())
+		entries, err := os.ReadDir(ownerDir)
+		if err != nil {
+			return err
+		}
+
+		// Group repo@version dirs by repo name.
+		repoVersions := make(map[string][]os.DirEntry)
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			repo, _, found := strings.Cut(e.Name(), "@")
+			if !found {
+				continue
+			}
+			repoVersions[repo] = append(repoVersions[repo], e)
+		}
+
+		for _, versions := range repoVersions {
+			if len(versions) <= 1 {
+				continue
+			}
+
+			// Sort by modification time, keep the newest.
+			sort.Slice(versions, func(i, j int) bool {
+				iInfo, _ := versions[i].Info()
+				jInfo, _ := versions[j].Info()
+				return iInfo.ModTime().Before(jInfo.ModTime())
+			})
+
+			for _, v := range versions[:len(versions)-1] {
+				dir := filepath.Join(ownerDir, v.Name())
+				if err := os.RemoveAll(dir); err != nil {
+					return err
+				}
+				fmt.Printf("purged %s/%s\n", owner.Name(), v.Name())
+			}
+		}
+	}
+
+	return nil
+}
+
 func buildVersion() string {
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
@@ -358,8 +425,10 @@ func buildVersion() string {
 
 func main() {
 	var showVersion bool
+	var doPurge bool
 	var baseDir string
 	flag.BoolVar(&showVersion, "version", false, "print version and exit")
+	flag.BoolVar(&doPurge, "purge", false, "remove all but the latest version of each installed tool")
 	flag.StringVar(&baseDir, "dir", defaultBaseDir(), "base install directory (overrides GHINST_DIR)")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: %s owner/repo[@version]\n", filepath.Base(os.Args[0]))
@@ -369,6 +438,14 @@ func main() {
 
 	if showVersion {
 		fmt.Println(buildVersion())
+		return
+	}
+
+	if doPurge {
+		if err := purge(baseDir); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
 		return
 	}
 
