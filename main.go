@@ -1,9 +1,15 @@
 package main
 
 import (
+	"archive/tar"
+	"archive/zip"
+	"bytes"
+	"compress/bzip2"
+	"compress/gzip"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -69,7 +75,181 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Println(asset.BrowserDownloadURL)
+	data, err := download(asset.BrowserDownloadURL)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: downloading: %v\n", err)
+		os.Exit(1)
+	}
+
+	binName, binData, err := extractBinary(data, asset.Name)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: extracting: %v\n", err)
+		os.Exit(1)
+	}
+
+	linkPath, err := installBinary(owner, repo, release.TagName, binName, binData)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: installing: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("installed %s (%s) → %s\n", repo, release.TagName, linkPath)
+}
+
+func download(url string) ([]byte, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("download returned HTTP %d", resp.StatusCode)
+	}
+
+	return io.ReadAll(resp.Body)
+}
+
+// extractBinary extracts the binary from an archive, returning its name and content.
+// For non-archives (raw binary), it returns the asset name and data as-is.
+func extractBinary(data []byte, assetName string) (string, []byte, error) {
+	lower := strings.ToLower(assetName)
+	switch {
+	case strings.HasSuffix(lower, ".tar.gz"), strings.HasSuffix(lower, ".tgz"):
+		gz, err := gzip.NewReader(bytes.NewReader(data))
+		if err != nil {
+			return "", nil, err
+		}
+		defer gz.Close()
+		return findInTar(tar.NewReader(gz))
+
+	case strings.HasSuffix(lower, ".tar.bz2"):
+		return findInTar(tar.NewReader(bzip2.NewReader(bytes.NewReader(data))))
+
+	case strings.HasSuffix(lower, ".zip"):
+		return findInZip(data)
+	}
+
+	return assetName, data, nil
+}
+
+// findInTar returns the first executable file in a tar archive.
+func findInTar(tr *tar.Reader) (string, []byte, error) {
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", nil, err
+		}
+
+		if hdr.Typeflag != tar.TypeReg || hdr.FileInfo().Mode()&0111 == 0 {
+			continue
+		}
+
+		data, err := io.ReadAll(tr)
+		if err != nil {
+			return "", nil, err
+		}
+
+		return filepath.Base(hdr.Name), data, nil
+	}
+
+	return "", nil, fmt.Errorf("no executable found in archive")
+}
+
+// findInZip returns the first executable file in a zip archive.
+// Falls back to the first file without an extension if no exec bits are set.
+func findInZip(data []byte) (string, []byte, error) {
+	r, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return "", nil, err
+	}
+
+	var fallback *zip.File
+	for _, f := range r.File {
+		if f.FileInfo().IsDir() {
+			continue
+		}
+
+		base := filepath.Base(f.Name)
+		isExec := f.Mode()&0111 != 0
+		noExt := filepath.Ext(base) == ""
+
+		if isExec || noExt {
+			if fallback == nil {
+				fallback = f
+			}
+			if isExec {
+				content, err := readZipFile(f)
+				if err != nil {
+					return "", nil, err
+				}
+				return base, content, nil
+			}
+		}
+	}
+
+	if fallback != nil {
+		content, err := readZipFile(fallback)
+		if err != nil {
+			return "", nil, err
+		}
+		return filepath.Base(fallback.Name), content, nil
+	}
+
+	return "", nil, fmt.Errorf("no executable found in archive")
+}
+
+func readZipFile(f *zip.File) ([]byte, error) {
+	rc, err := f.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer rc.Close()
+	return io.ReadAll(rc)
+}
+
+// installBinary places the binary under ~/.local/ghinst/owner/repo@tag/
+// and symlinks it into ~/.local/bin/.
+func installBinary(owner, repo, tag, binName string, data []byte) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+
+	installDir := filepath.Join(home, ".local", "ghinst", owner, repo+"@"+tag)
+	if err := os.MkdirAll(installDir, 0755); err != nil {
+		return "", err
+	}
+
+	binPath := filepath.Join(installDir, binName)
+	if err := os.WriteFile(binPath, data, 0755); err != nil {
+		return "", err
+	}
+
+	linkDir := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(linkDir, 0755); err != nil {
+		return "", err
+	}
+
+	linkPath := filepath.Join(linkDir, binName)
+	os.Remove(linkPath) // replace any existing symlink
+	if err := os.Symlink(binPath, linkPath); err != nil {
+		return "", err
+	}
+
+	return linkPath, nil
 }
 
 func fetchRelease(owner, repo, tag string) (Release, error) {
