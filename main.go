@@ -40,63 +40,6 @@ var archAliases = map[string][]string{
 	"386":   {"386", "i386", "i686"},
 }
 
-func main() {
-	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: %s owner/repo[@version]\n", filepath.Base(os.Args[0]))
-		flag.PrintDefaults()
-	}
-	flag.Parse()
-
-	if flag.NArg() != 1 {
-		flag.Usage()
-		os.Exit(1)
-	}
-
-	owner, repo, tag, err := parseTarget(flag.Arg(0))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
-
-	release, err := fetchRelease(owner, repo, tag)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
-
-	asset, err := selectAsset(release.Assets, runtime.GOOS, runtime.GOARCH)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		fmt.Fprintln(os.Stderr, "available assets:")
-		for _, a := range release.Assets {
-			fmt.Fprintf(os.Stderr, "  %s\n", a.Name)
-		}
-		os.Exit(1)
-	}
-
-	tmp, err := download(asset.BrowserDownloadURL)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: downloading: %v\n", err)
-		os.Exit(1)
-	}
-	defer os.Remove(tmp.Name())
-	defer tmp.Close()
-
-	binName, binData, err := extractBinary(tmp, asset.Name)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: extracting: %v\n", err)
-		os.Exit(1)
-	}
-
-	linkPath, err := installBinary(owner, repo, release.TagName, binName, binData)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: installing: %v\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Printf("installed %s (%s) → %s\n", repo, release.TagName, linkPath)
-}
-
 func download(url string) (*os.File, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -135,9 +78,9 @@ func download(url string) (*os.File, error) {
 	return tmp, nil
 }
 
-// extractBinary extracts the binary from an archive, returning its name and content.
-// For non-archives (raw binary), it returns the asset name and file content.
-func extractBinary(f *os.File, assetName string) (string, []byte, error) {
+// extractBinary extracts the binary from an archive into a temp file.
+// For non-archives (raw binary), it returns the input file as-is.
+func extractBinary(f *os.File, assetName string) (string, *os.File, error) {
 	lower := strings.ToLower(assetName)
 	switch {
 	case strings.HasSuffix(lower, ".tar.gz"), strings.HasSuffix(lower, ".tgz"):
@@ -159,15 +102,11 @@ func extractBinary(f *os.File, assetName string) (string, []byte, error) {
 		return findInZip(f, info.Size())
 	}
 
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return "", nil, err
-	}
-	return assetName, data, nil
+	return assetName, f, nil
 }
 
-// findInTar returns the first executable file in a tar archive.
-func findInTar(tr *tar.Reader) (string, []byte, error) {
+// findInTar returns the first executable file in a tar archive as a temp file.
+func findInTar(tr *tar.Reader) (string, *os.File, error) {
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -181,26 +120,26 @@ func findInTar(tr *tar.Reader) (string, []byte, error) {
 			continue
 		}
 
-		data, err := io.ReadAll(tr)
+		tmp, err := writeTempFile(tr)
 		if err != nil {
 			return "", nil, err
 		}
 
-		return filepath.Base(hdr.Name), data, nil
+		return filepath.Base(hdr.Name), tmp, nil
 	}
 
 	return "", nil, fmt.Errorf("no executable found in archive")
 }
 
-// findInZip returns the first executable file in a zip archive.
+// findInZip returns the first executable file in a zip archive as a temp file.
 // Falls back to the first file without an extension if no exec bits are set.
-func findInZip(r io.ReaderAt, size int64) (string, []byte, error) {
+func findInZip(r io.ReaderAt, size int64) (string, *os.File, error) {
 	zr, err := zip.NewReader(r, size)
 	if err != nil {
 		return "", nil, err
 	}
 
-	var fallback *zip.File
+	var best *zip.File
 	for _, f := range zr.File {
 		if f.FileInfo().IsDir() {
 			continue
@@ -210,43 +149,57 @@ func findInZip(r io.ReaderAt, size int64) (string, []byte, error) {
 		isExec := f.Mode()&0111 != 0
 		noExt := filepath.Ext(base) == ""
 
-		if isExec || noExt {
-			if fallback == nil {
-				fallback = f
-			}
-			if isExec {
-				content, err := readZipFile(f)
-				if err != nil {
-					return "", nil, err
-				}
-				return base, content, nil
-			}
+		if isExec {
+			best = f
+			break
+		}
+		if noExt && best == nil {
+			best = f
 		}
 	}
 
-	if fallback != nil {
-		content, err := readZipFile(fallback)
-		if err != nil {
-			return "", nil, err
-		}
-		return filepath.Base(fallback.Name), content, nil
+	if best == nil {
+		return "", nil, fmt.Errorf("no executable found in archive")
 	}
 
-	return "", nil, fmt.Errorf("no executable found in archive")
+	rc, err := best.Open()
+	if err != nil {
+		return "", nil, err
+	}
+	defer rc.Close()
+
+	tmp, err := writeTempFile(rc)
+	if err != nil {
+		return "", nil, err
+	}
+
+	return filepath.Base(best.Name), tmp, nil
 }
 
-func readZipFile(f *zip.File) ([]byte, error) {
-	rc, err := f.Open()
+func writeTempFile(r io.Reader) (*os.File, error) {
+	tmp, err := os.CreateTemp("", "ghinst-bin-*")
 	if err != nil {
 		return nil, err
 	}
-	defer rc.Close()
-	return io.ReadAll(rc)
+
+	if _, err := io.Copy(tmp, r); err != nil {
+		os.Remove(tmp.Name())
+		tmp.Close()
+		return nil, err
+	}
+
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		os.Remove(tmp.Name())
+		tmp.Close()
+		return nil, err
+	}
+
+	return tmp, nil
 }
 
 // installBinary places the binary under ~/.local/ghinst/owner/repo@tag/
 // and symlinks it into ~/.local/bin/.
-func installBinary(owner, repo, tag, binName string, data []byte) (string, error) {
+func installBinary(owner, repo, tag, binName string, src *os.File) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
@@ -258,7 +211,13 @@ func installBinary(owner, repo, tag, binName string, data []byte) (string, error
 	}
 
 	binPath := filepath.Join(installDir, binName)
-	if err := os.WriteFile(binPath, data, 0755); err != nil {
+	dst, err := os.OpenFile(binPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+	if err != nil {
+		return "", err
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, src); err != nil {
 		return "", err
 	}
 
@@ -372,4 +331,63 @@ func matchesAny(s string, phrases []string) bool {
 		}
 	}
 	return false
+}
+
+func main() {
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "usage: %s owner/repo[@version]\n", filepath.Base(os.Args[0]))
+		flag.PrintDefaults()
+	}
+	flag.Parse()
+
+	if flag.NArg() != 1 {
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	owner, repo, tag, err := parseTarget(flag.Arg(0))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	release, err := fetchRelease(owner, repo, tag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	asset, err := selectAsset(release.Assets, runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		fmt.Fprintln(os.Stderr, "available assets:")
+		for _, a := range release.Assets {
+			fmt.Fprintf(os.Stderr, "  %s\n", a.Name)
+		}
+		os.Exit(1)
+	}
+
+	tmp, err := download(asset.BrowserDownloadURL)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: downloading: %v\n", err)
+		os.Exit(1)
+	}
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+
+	binName, binFile, err := extractBinary(tmp, asset.Name)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: extracting: %v\n", err)
+		os.Exit(1)
+	}
+	defer os.Remove(binFile.Name())
+	defer binFile.Close()
+
+	linkPath, err := installBinary(owner, repo, release.TagName, binName, binFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: installing: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("installed %s (%s) → %s\n", repo, release.TagName, linkPath)
 }
