@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"net/http"
 	"os"
@@ -34,18 +35,22 @@ var archAliases = map[string][]string{
 }
 
 func main() {
-	if len(os.Args) != 2 {
+	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: ghinst owner/repo\n")
+		flag.PrintDefaults()
+	}
+	flag.Parse()
+
+	if flag.NArg() != 1 {
+		flag.Usage()
 		os.Exit(1)
 	}
 
-	parts := strings.SplitN(os.Args[1], "/", 2)
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		fmt.Fprintf(os.Stderr, "invalid argument %q: expected owner/repo\n", os.Args[1])
+	owner, repo, err := parseTarget(flag.Arg(0))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-
-	owner, repo := parts[0], parts[1]
 
 	release, err := fetchLatestRelease(owner, repo)
 	if err != nil {
@@ -130,6 +135,14 @@ func selectAsset(assets []Asset, goos, goarch string) (Asset, error) {
 	})
 
 	return candidates[0], nil
+}
+
+func parseTarget(s string) (owner, repo string, err error) {
+	parts := strings.SplitN(s, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", fmt.Errorf("invalid target %q: expected owner/repo", s)
+	}
+	return parts[0], parts[1], nil
 }
 
 var archiveExts = []string{".tar.gz", ".tgz", ".tar.bz2", ".tar.xz", ".zip"}
