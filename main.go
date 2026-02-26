@@ -349,14 +349,15 @@ func buildVersion() string {
 }
 
 func main() {
-	versionFlag := flag.Bool("version", false, "print version and exit")
+	var showVersion bool
+	flag.BoolVar(&showVersion, "version", false, "print version and exit")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: %s owner/repo[@version]\n", filepath.Base(os.Args[0]))
 		flag.PrintDefaults()
 	}
 	flag.Parse()
 
-	if *versionFlag {
+	if showVersion {
 		fmt.Println(buildVersion())
 		return
 	}
