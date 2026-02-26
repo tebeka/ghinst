@@ -1,4 +1,4 @@
-.PHONY: test tag-patch tag-minor
+.PHONY: test release-patch release-minor
 
 default:
 	$(error pick a target)
@@ -7,8 +7,8 @@ test:
 	go tool staticcheck ./...
 	go test -v ./...
 
-tag-patch:
-	git tag $(shell go tool svu patch)
+release-patch:
+	@tag=$$(go tool svu patch) && git tag $$tag && git push origin $$tag
 
-tag-minor:
-	git tag $(shell go tool svu minor)
+release-minor:
+	@tag=$$(go tool svu minor) && git tag $$tag && git push origin $$tag
