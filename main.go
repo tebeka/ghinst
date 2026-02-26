@@ -37,7 +37,7 @@ var archAliases = map[string][]string{
 
 func main() {
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: %s owner/repo\n", filepath.Base(os.Args[0]))
+		fmt.Fprintf(os.Stderr, "usage: %s owner/repo[@version]\n", filepath.Base(os.Args[0]))
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -47,13 +47,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	owner, repo, err := parseTarget(flag.Arg(0))
+	owner, repo, tag, err := parseTarget(flag.Arg(0))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 
-	release, err := fetchLatestRelease(owner, repo)
+	release, err := fetchRelease(owner, repo, tag)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -72,8 +72,11 @@ func main() {
 	fmt.Println(asset.BrowserDownloadURL)
 }
 
-func fetchLatestRelease(owner, repo string) (Release, error) {
+func fetchRelease(owner, repo, tag string) (Release, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", owner, repo)
+	if tag != "" {
+		url = fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/tags/%s", owner, repo, tag)
+	}
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -93,7 +96,7 @@ func fetchLatestRelease(owner, repo string) (Release, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode == 404 {
-		return Release{}, fmt.Errorf("release not found for %s/%s", owner, repo)
+		return Release{}, fmt.Errorf("release not found for %s/%s@%s", owner, repo, tag)
 	}
 	if resp.StatusCode != 200 {
 		return Release{}, fmt.Errorf("GitHub API returned %d", resp.StatusCode)
@@ -138,12 +141,13 @@ func selectAsset(assets []Asset, goos, goarch string) (Asset, error) {
 	return candidates[0], nil
 }
 
-func parseTarget(s string) (owner, repo string, err error) {
-	parts := strings.SplitN(s, "/", 2)
+func parseTarget(s string) (owner, repo, tag string, err error) {
+	slug, tag, _ := strings.Cut(s, "@")
+	parts := strings.SplitN(slug, "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", fmt.Errorf("invalid target %q: expected owner/repo", s)
+		return "", "", "", fmt.Errorf("invalid target %q: expected owner/repo[@version]", s)
 	}
-	return parts[0], parts[1], nil
+	return parts[0], parts[1], tag, nil
 }
 
 var archiveExts = []string{".tar.gz", ".tgz", ".tar.bz2", ".tar.xz", ".zip"}
