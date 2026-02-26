@@ -198,15 +198,10 @@ func writeTempFile(r io.Reader) (*os.File, error) {
 	return tmp, nil
 }
 
-// installBinary places the binary under ~/.local/ghinst/owner/repo@tag/
-// and symlinks it into ~/.local/bin/.
-func installBinary(owner, repo, tag, binName string, src *os.File) (_ string, err error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-
-	installDir := filepath.Join(home, ".local", "ghinst", owner, repo+"@"+tag)
+// installBinary places the binary under <baseDir>/ghinst/owner/repo@tag/
+// and symlinks it into <baseDir>/bin/.
+func installBinary(baseDir, owner, repo, tag, binName string, src *os.File) (_ string, err error) {
+	installDir := filepath.Join(baseDir, "ghinst", owner, repo+"@"+tag)
 	if err := os.MkdirAll(installDir, 0755); err != nil {
 		return "", err
 	}
@@ -227,7 +222,7 @@ func installBinary(owner, repo, tag, binName string, src *os.File) (_ string, er
 		return "", err
 	}
 
-	linkDir := filepath.Join(home, ".local", "bin")
+	linkDir := filepath.Join(baseDir, "bin")
 	if err := os.MkdirAll(linkDir, 0755); err != nil {
 		return "", err
 	}
@@ -339,6 +334,19 @@ func matchesAny(s string, phrases []string) bool {
 	return false
 }
 
+func defaultBaseDir() string {
+	if dir := os.Getenv("GHINST_DIR"); dir != "" {
+		return dir
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "/usr/local"
+	}
+
+	return filepath.Join(home, ".local")
+}
+
 func buildVersion() string {
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
@@ -350,7 +358,9 @@ func buildVersion() string {
 
 func main() {
 	var showVersion bool
+	var baseDir string
 	flag.BoolVar(&showVersion, "version", false, "print version and exit")
+	flag.StringVar(&baseDir, "dir", defaultBaseDir(), "base install directory (overrides GHINST_DIR)")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: %s owner/repo[@version]\n", filepath.Base(os.Args[0]))
 		flag.PrintDefaults()
@@ -405,7 +415,7 @@ func main() {
 	defer os.Remove(binFile.Name())
 	defer binFile.Close()
 
-	linkPath, err := installBinary(owner, repo, release.TagName, binName, binFile)
+	linkPath, err := installBinary(baseDir, owner, repo, release.TagName, binName, binFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: installing: %v\n", err)
 		os.Exit(1)
