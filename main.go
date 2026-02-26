@@ -3,7 +3,6 @@ package main
 import (
 	"archive/tar"
 	"archive/zip"
-	"bytes"
 	"compress/bzip2"
 	"compress/gzip"
 	"encoding/json"
@@ -75,13 +74,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	data, err := download(asset.BrowserDownloadURL)
+	tmp, err := download(asset.BrowserDownloadURL)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: downloading: %v\n", err)
 		os.Exit(1)
 	}
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
 
-	binName, binData, err := extractBinary(data, asset.Name)
+	binName, binData, err := extractBinary(tmp, asset.Name)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: extracting: %v\n", err)
 		os.Exit(1)
@@ -96,7 +97,7 @@ func main() {
 	fmt.Printf("installed %s (%s) → %s\n", repo, release.TagName, linkPath)
 }
 
-func download(url string) ([]byte, error) {
+func download(url string) (*os.File, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -116,16 +117,31 @@ func download(url string) ([]byte, error) {
 		return nil, fmt.Errorf("download returned HTTP %d", resp.StatusCode)
 	}
 
-	return io.ReadAll(resp.Body)
+	tmp, err := os.CreateTemp("", "ghinst-*")
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := io.Copy(tmp, resp.Body); err != nil {
+		os.Remove(tmp.Name())
+		return nil, err
+	}
+
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		os.Remove(tmp.Name())
+		return nil, err
+	}
+
+	return tmp, nil
 }
 
 // extractBinary extracts the binary from an archive, returning its name and content.
-// For non-archives (raw binary), it returns the asset name and data as-is.
-func extractBinary(data []byte, assetName string) (string, []byte, error) {
+// For non-archives (raw binary), it returns the asset name and file content.
+func extractBinary(f *os.File, assetName string) (string, []byte, error) {
 	lower := strings.ToLower(assetName)
 	switch {
 	case strings.HasSuffix(lower, ".tar.gz"), strings.HasSuffix(lower, ".tgz"):
-		gz, err := gzip.NewReader(bytes.NewReader(data))
+		gz, err := gzip.NewReader(f)
 		if err != nil {
 			return "", nil, err
 		}
@@ -133,12 +149,20 @@ func extractBinary(data []byte, assetName string) (string, []byte, error) {
 		return findInTar(tar.NewReader(gz))
 
 	case strings.HasSuffix(lower, ".tar.bz2"):
-		return findInTar(tar.NewReader(bzip2.NewReader(bytes.NewReader(data))))
+		return findInTar(tar.NewReader(bzip2.NewReader(f)))
 
 	case strings.HasSuffix(lower, ".zip"):
-		return findInZip(data)
+		info, err := f.Stat()
+		if err != nil {
+			return "", nil, err
+		}
+		return findInZip(f, info.Size())
 	}
 
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return "", nil, err
+	}
 	return assetName, data, nil
 }
 
@@ -170,14 +194,14 @@ func findInTar(tr *tar.Reader) (string, []byte, error) {
 
 // findInZip returns the first executable file in a zip archive.
 // Falls back to the first file without an extension if no exec bits are set.
-func findInZip(data []byte) (string, []byte, error) {
-	r, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+func findInZip(r io.ReaderAt, size int64) (string, []byte, error) {
+	zr, err := zip.NewReader(r, size)
 	if err != nil {
 		return "", nil, err
 	}
 
 	var fallback *zip.File
-	for _, f := range r.File {
+	for _, f := range zr.File {
 		if f.FileInfo().IsDir() {
 			continue
 		}
