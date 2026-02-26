@@ -8,7 +8,9 @@ test:
 	go test -v ./...
 
 release-patch:
-	@tag=$$(go tool svu patch) && git tag $$tag && git push origin $$tag
+	git tag $(shell go tool svu patch)
+	git push --tags
 
 release-minor:
-	@tag=$$(go tool svu minor) && git tag $$tag && git push origin $$tag
+	git tag $(shell go tool svu minor)
+	git push --tags
