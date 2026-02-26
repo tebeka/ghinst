@@ -199,7 +199,7 @@ func writeTempFile(r io.Reader) (*os.File, error) {
 
 // installBinary places the binary under ~/.local/ghinst/owner/repo@tag/
 // and symlinks it into ~/.local/bin/.
-func installBinary(owner, repo, tag, binName string, src *os.File) (string, error) {
+func installBinary(owner, repo, tag, binName string, src *os.File) (_ string, err error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
@@ -209,6 +209,11 @@ func installBinary(owner, repo, tag, binName string, src *os.File) (string, erro
 	if err := os.MkdirAll(installDir, 0755); err != nil {
 		return "", err
 	}
+	defer func() {
+		if err != nil {
+			os.RemoveAll(installDir)
+		}
+	}()
 
 	binPath := filepath.Join(installDir, binName)
 	dst, err := os.OpenFile(binPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
