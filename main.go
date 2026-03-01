@@ -416,7 +416,7 @@ func buildVersion() string {
 		return "unknown"
 	}
 
-	v := info.Main.Version
+	v := strings.TrimSuffix(info.Main.Version, "+dirty")
 	// Pseudo-versions embed a git hash (v0.0.0-YYYYMMDDHHMMSS-abcdef123456);
 	// strip everything after the timestamp.
 	if parts := strings.SplitN(v, "-", 3); len(parts) == 3 {
