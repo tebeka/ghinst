@@ -213,16 +213,29 @@ func installBinary(baseDir, owner, repo, tag, binName string, src *os.File) (_ s
 	}()
 
 	binPath := filepath.Join(installDir, binName)
-	dst, err := os.OpenFile(binPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+	tmp, err := os.CreateTemp(installDir, ".tmp-*")
 	if err != nil {
 		return "", err
 	}
-	defer dst.Close()
+	tmpName := tmp.Name()
 
-	if _, err := io.Copy(dst, src); err != nil {
+	if _, err := io.Copy(tmp, src); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
 		return "", err
 	}
-	dst.Close()
+
+	if err := tmp.Chmod(0755); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return "", err
+	}
+	tmp.Close()
+
+	if err := os.Rename(tmpName, binPath); err != nil {
+		os.Remove(tmpName)
+		return "", err
+	}
 
 	// Touch the install dir so purge can sort by most recently installed.
 	now := time.Now()
