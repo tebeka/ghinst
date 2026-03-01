@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -333,6 +335,95 @@ func TestInstallBinary(t *testing.T) {
 	}
 	if target != binPath {
 		t.Errorf("symlink target = %q, want %q", target, binPath)
+	}
+}
+
+func TestInstallBinaryReplacesRunningBinaryLinux(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux-specific behavior")
+	}
+
+	tmpDir := t.TempDir()
+	owner, repo, tag, binName := "owner", "repo", "v1.0.0", "tool"
+
+	initial := []byte("#!/bin/sh\nsleep 2\n")
+	src1, err := writeTempFile(bytes.NewReader(initial))
+	if err != nil {
+		t.Fatalf("writeTempFile initial: %v", err)
+	}
+	defer os.Remove(src1.Name())
+	defer src1.Close()
+
+	if _, err := installBinary(tmpDir, owner, repo, tag, binName, src1); err != nil {
+		t.Fatalf("installBinary initial: %v", err)
+	}
+
+	binPath := filepath.Join(tmpDir, "ghinst", owner, repo+"@"+tag, binName)
+	cmd := exec.Command(binPath)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start running binary: %v", err)
+	}
+	defer cmd.Wait()
+
+	replacement := []byte("#!/bin/sh\necho replaced\n")
+	src2, err := writeTempFile(bytes.NewReader(replacement))
+	if err != nil {
+		t.Fatalf("writeTempFile replacement: %v", err)
+	}
+	defer os.Remove(src2.Name())
+	defer src2.Close()
+
+	if _, err := installBinary(tmpDir, owner, repo, tag, binName, src2); err != nil {
+		t.Fatalf("installBinary replace while running: %v", err)
+	}
+
+	got, err := os.ReadFile(binPath)
+	if err != nil {
+		t.Fatalf("ReadFile replaced binary: %v", err)
+	}
+	if !bytes.Equal(got, replacement) {
+		t.Fatalf("replaced binary content mismatch")
+	}
+
+	info, err := os.Stat(binPath)
+	if err != nil {
+		t.Fatalf("Stat replaced binary: %v", err)
+	}
+	if info.Mode()&0111 == 0 {
+		t.Error("replaced binary is not executable")
+	}
+}
+
+func TestInstallBinaryCleanupOnRenameFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	owner, repo, tag, binName := "owner", "repo", "v1.0.0", "tool"
+
+	installDir := filepath.Join(tmpDir, "ghinst", owner, repo+"@"+tag)
+	if err := os.MkdirAll(filepath.Join(installDir, binName), 0755); err != nil {
+		t.Fatalf("setup installDir: %v", err)
+	}
+
+	src, err := writeTempFile(bytes.NewReader([]byte("binary content")))
+	if err != nil {
+		t.Fatalf("writeTempFile: %v", err)
+	}
+	defer os.Remove(src.Name())
+	defer src.Close()
+
+	if _, err := installBinary(tmpDir, owner, repo, tag, binName, src); err == nil {
+		t.Fatal("installBinary expected error when rename target is a directory")
+	}
+
+	if _, err := os.Stat(installDir); !os.IsNotExist(err) {
+		t.Fatalf("installDir should be removed on failure, stat err=%v", err)
+	}
+
+	tmpMatches, err := filepath.Glob(filepath.Join(tmpDir, "ghinst", owner, repo+"@"+tag, ".tmp-*"))
+	if err != nil {
+		t.Fatalf("Glob temp files: %v", err)
+	}
+	if len(tmpMatches) != 0 {
+		t.Fatalf("temp files were not cleaned up: %v", tmpMatches)
 	}
 }
 
