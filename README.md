@@ -1,6 +1,6 @@
 # ghinst
 
-Install binaries from GitHub releases.
+Install binaries from GitHub releases to `~/.local/bin`.
 
 ## Install
 
