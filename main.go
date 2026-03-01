@@ -429,12 +429,14 @@ func buildVersion() string {
 var options struct {
 	showVersion bool
 	doPurge     bool
+	force       bool
 	baseDir     string
 }
 
 func main() {
 	flag.BoolVar(&options.showVersion, "version", false, "print version and exit")
 	flag.BoolVar(&options.doPurge, "purge", false, "remove all but the latest installed version of owner/repo")
+	flag.BoolVar(&options.force, "force", false, "install even if already on the latest version")
 	flag.StringVar(&options.baseDir, "dir", defaultBaseDir(), "base install directory (overrides GHINST_DIR)")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: %s owner/repo[@version]\n", filepath.Base(os.Args[0]))
@@ -470,6 +472,12 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
+	}
+
+	installDir := filepath.Join(options.baseDir, "ghinst", owner, repo+"@"+release.TagName)
+	if _, err := os.Stat(installDir); err == nil && !options.force {
+		fmt.Printf("%s/%s is already at %s\n", owner, repo, release.TagName)
+		return
 	}
 
 	asset, err := selectAsset(release.Assets, runtime.GOOS, runtime.GOARCH)
