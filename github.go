@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -37,12 +38,14 @@ var archiveExts = []string{".tar.gz", ".tgz", ".tar.bz2", ".tar.xz", ".zip"}
 var apiBase = "https://api.github.com"
 
 func fetchRelease(owner, repo, tag string) (Release, error) {
-	url := fmt.Sprintf("%s/repos/%s/%s/releases/latest", apiBase, owner, repo)
+	ownerPath := url.PathEscape(owner)
+	repoPath := url.PathEscape(repo)
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/releases/latest", apiBase, ownerPath, repoPath)
 	if tag != "" {
-		url = fmt.Sprintf("%s/repos/%s/%s/releases/tags/%s", apiBase, owner, repo, tag)
+		endpoint = fmt.Sprintf("%s/repos/%s/%s/releases/tags/%s", apiBase, ownerPath, repoPath, url.PathEscape(tag))
 	}
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
 		return Release{}, err
 	}
@@ -60,6 +63,9 @@ func fetchRelease(owner, repo, tag string) (Release, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode == 404 {
+		if tag == "" {
+			return Release{}, fmt.Errorf("latest release not found for %s/%s", owner, repo)
+		}
 		return Release{}, fmt.Errorf("release not found for %s/%s@%s", owner, repo, tag)
 	}
 	if resp.StatusCode != 200 {
@@ -107,6 +113,9 @@ func selectAsset(assets []Asset, goos, goarch string) (Asset, error) {
 
 func parseTarget(s string) (owner, repo, tag string, err error) {
 	slug, tag, _ := strings.Cut(s, "@")
+	if strings.Contains(s, "@") && tag == "" {
+		return "", "", "", fmt.Errorf("invalid target %q: empty version after @", s)
+	}
 	parts := strings.SplitN(slug, "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return "", "", "", fmt.Errorf("invalid target %q: expected owner/repo[@version]", s)

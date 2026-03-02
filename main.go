@@ -27,7 +27,7 @@ func buildVersion() string {
 	// Pseudo-versions embed a git hash (v0.0.0-YYYYMMDDHHMMSS-abcdef123456);
 	// strip everything after the timestamp.
 	if parts := strings.SplitN(v, "-", 3); len(parts) == 3 {
-		v = parts[0]
+		v = parts[0] + "-" + parts[1]
 	}
 
 	return v
@@ -43,6 +43,10 @@ func main() {
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+	if options.baseDir == "" {
+		fmt.Fprintln(os.Stderr, "error: could not determine install base dir; set -dir or GHINST_DIR")
+		os.Exit(1)
+	}
 
 	if options.showVersion {
 		fmt.Printf("%s %s\n", filepath.Base(os.Args[0]), buildVersion())
@@ -75,9 +79,16 @@ func main() {
 	}
 
 	installDir := filepath.Join(options.baseDir, "ghinst", owner, repo+"@"+release.TagName)
-	if _, err := os.Stat(installDir); err == nil && !options.force {
-		fmt.Printf("%s/%s is already at %s\n", owner, repo, release.TagName)
-		return
+	if !options.force {
+		healthy, err := isHealthyInstallDir(installDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: checking existing install: %v\n", err)
+			os.Exit(1)
+		}
+		if healthy {
+			fmt.Printf("%s/%s is already at %s\n", owner, repo, release.TagName)
+			return
+		}
 	}
 
 	asset, err := selectAsset(release.Assets, runtime.GOOS, runtime.GOARCH)
@@ -113,4 +124,36 @@ func main() {
 	}
 
 	fmt.Printf("installed %s (%s) → %s\n", repo, release.TagName, linkPath)
+}
+
+func isHealthyInstallDir(installDir string) (bool, error) {
+	info, err := os.Stat(installDir)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !info.IsDir() {
+		return false, fmt.Errorf("install path is not a directory: %s", installDir)
+	}
+
+	entries, err := os.ReadDir(installDir)
+	if err != nil {
+		return false, err
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		fi, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if fi.Mode().IsRegular() && fi.Mode()&0111 != 0 {
+			return true, nil
+		}
+	}
+	return false, nil
 }

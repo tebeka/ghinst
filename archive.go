@@ -66,14 +66,16 @@ func findInTar(tr *tar.Reader) (string, *os.File, error) {
 }
 
 // findInZip returns the first executable file in a zip archive as a temp file.
-// Falls back to the first file without an extension if no exec bits are set.
+// Falls back to likely executable names if no exec bits are set.
 func findInZip(r io.ReaderAt, size int64) (string, *os.File, error) {
 	zr, err := zip.NewReader(r, size)
 	if err != nil {
 		return "", nil, err
 	}
 
-	var best *zip.File
+	var execMatch *zip.File
+	var exeFallback *zip.File
+	var noExtFallback *zip.File
 	for _, f := range zr.File {
 		if f.FileInfo().IsDir() {
 			continue
@@ -81,15 +83,27 @@ func findInZip(r io.ReaderAt, size int64) (string, *os.File, error) {
 
 		base := filepath.Base(f.Name)
 		isExec := f.Mode()&0111 != 0
-		noExt := filepath.Ext(base) == ""
+		ext := strings.ToLower(filepath.Ext(base))
 
 		if isExec {
-			best = f
+			execMatch = f
 			break
 		}
-		if noExt && best == nil {
-			best = f
+		if ext == ".exe" && exeFallback == nil {
+			exeFallback = f
+			continue
 		}
+		if ext == "" && noExtFallback == nil {
+			noExtFallback = f
+		}
+	}
+
+	best := execMatch
+	if best == nil {
+		best = exeFallback
+	}
+	if best == nil {
+		best = noExtFallback
 	}
 
 	if best == nil {

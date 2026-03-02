@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -98,6 +99,12 @@ func TestInstallBinaryReplacesRunningBinaryLinux(t *testing.T) {
 		t.Fatalf("start running binary: %v", err)
 	}
 	defer cmd.Wait()
+	if cmd.Process == nil {
+		t.Fatal("running process should have a PID")
+	}
+	if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
+		t.Fatalf("running process is not alive: %v", err)
+	}
 
 	replacement := []byte("#!/bin/sh\necho replaced\n")
 	src2, err := writeTempFile(bytes.NewReader(replacement))
@@ -148,8 +155,11 @@ func TestInstallBinaryCleanupOnRenameFailure(t *testing.T) {
 		t.Fatal("installBinary expected error when rename target is a directory")
 	}
 
-	if _, err := os.Stat(installDir); !os.IsNotExist(err) {
-		t.Fatalf("installDir should be removed on failure, stat err=%v", err)
+	if _, err := os.Stat(installDir); err != nil {
+		t.Fatalf("installDir should remain on failure when it pre-existed, stat err=%v", err)
+	}
+	if info, err := os.Stat(filepath.Join(installDir, binName)); err != nil || !info.IsDir() {
+		t.Fatalf("pre-existing install content should be preserved, stat err=%v info=%v", err, info)
 	}
 
 	tmpMatches, err := filepath.Glob(filepath.Join(tmpDir, "ghinst", owner, repo+"@"+tag, ".tmp-*"))
@@ -158,6 +168,38 @@ func TestInstallBinaryCleanupOnRenameFailure(t *testing.T) {
 	}
 	if len(tmpMatches) != 0 {
 		t.Fatalf("temp files were not cleaned up: %v", tmpMatches)
+	}
+}
+
+func TestInstallBinaryRefusesReplacingRegularFileInBin(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	src, err := writeTempFile(bytes.NewReader([]byte("binary content")))
+	if err != nil {
+		t.Fatalf("writeTempFile: %v", err)
+	}
+	defer os.Remove(src.Name())
+	defer src.Close()
+
+	linkDir := filepath.Join(tmpDir, "bin")
+	if err := os.MkdirAll(linkDir, 0755); err != nil {
+		t.Fatalf("MkdirAll bin: %v", err)
+	}
+	linkPath := filepath.Join(linkDir, "tool")
+	if err := os.WriteFile(linkPath, []byte("keep me"), 0644); err != nil {
+		t.Fatalf("WriteFile existing linkPath: %v", err)
+	}
+
+	if _, err := installBinary(tmpDir, "owner", "repo", "v1.0.0", "tool", src); err == nil {
+		t.Fatal("installBinary expected error when bin path is regular file")
+	}
+
+	got, err := os.ReadFile(linkPath)
+	if err != nil {
+		t.Fatalf("ReadFile existing linkPath: %v", err)
+	}
+	if !bytes.Equal(got, []byte("keep me")) {
+		t.Fatalf("existing regular file at link path should be preserved")
 	}
 }
 
@@ -177,8 +219,12 @@ func TestPurge(t *testing.T) {
 
 	t1 := time.Now().Add(-time.Hour)
 	t2 := time.Now()
-	os.Chtimes(v1, t1, t1)
-	os.Chtimes(v2, t2, t2)
+	if err := os.Chtimes(v1, t1, t1); err != nil {
+		t.Fatalf("Chtimes v1: %v", err)
+	}
+	if err := os.Chtimes(v2, t2, t2); err != nil {
+		t.Fatalf("Chtimes v2: %v", err)
+	}
 
 	if err := purge(tmpDir, "owner", "repo"); err != nil {
 		t.Fatalf("purge: %v", err)
@@ -197,5 +243,12 @@ func TestPurge(t *testing.T) {
 	}
 	if _, err := os.Stat(v2); err != nil {
 		t.Error("v2.0.0 should still remain after no-op purge")
+	}
+}
+
+func TestPurgeMissingOwnerDirIsNoOp(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := purge(tmpDir, "owner", "repo"); err != nil {
+		t.Fatalf("purge missing owner dir should be no-op: %v", err)
 	}
 }

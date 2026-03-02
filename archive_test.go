@@ -14,7 +14,7 @@ func buildTarGz(files []struct {
 	name string
 	mode int64
 	body []byte
-}) []byte {
+}) ([]byte, error) {
 	buf := &bytes.Buffer{}
 	gw := gzip.NewWriter(buf)
 	tw := tar.NewWriter(gw)
@@ -26,22 +26,33 @@ func buildTarGz(files []struct {
 			Mode:     f.mode,
 			Size:     int64(len(f.body)),
 		}
-		tw.WriteHeader(hdr)
-		tw.Write(f.body)
+		if err := tw.WriteHeader(hdr); err != nil {
+			return nil, err
+		}
+		if _, err := tw.Write(f.body); err != nil {
+			return nil, err
+		}
 	}
 
-	tw.Close()
-	gw.Close()
-	return buf.Bytes()
+	if err := tw.Close(); err != nil {
+		return nil, err
+	}
+	if err := gw.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 func TestFindInTar(t *testing.T) {
 	content := []byte("#!/bin/sh\necho hello")
-	data := buildTarGz([]struct {
+	data, err := buildTarGz([]struct {
 		name string
 		mode int64
 		body []byte
 	}{{"tool", 0755, content}})
+	if err != nil {
+		t.Fatalf("buildTarGz: %v", err)
+	}
 
 	gr, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
@@ -65,13 +76,19 @@ func TestFindInTar(t *testing.T) {
 	}
 
 	// No executables → error.
-	data2 := buildTarGz([]struct {
+	data2, err := buildTarGz([]struct {
 		name string
 		mode int64
 		body []byte
 	}{{"readme.txt", 0644, []byte("hello")}})
+	if err != nil {
+		t.Fatalf("buildTarGz no-exec: %v", err)
+	}
 
-	gr2, _ := gzip.NewReader(bytes.NewReader(data2))
+	gr2, err := gzip.NewReader(bytes.NewReader(data2))
+	if err != nil {
+		t.Fatalf("gzip.NewReader no-exec: %v", err)
+	}
 	_, _, err = findInTar(tar.NewReader(gr2))
 	if err == nil {
 		t.Error("findInTar: expected error for archive with no executables")
@@ -82,28 +99,38 @@ func buildZip(files []struct {
 	name string
 	mode os.FileMode
 	body []byte
-}) []byte {
+}) ([]byte, error) {
 	buf := &bytes.Buffer{}
 	zw := zip.NewWriter(buf)
 
 	for _, f := range files {
 		fh := &zip.FileHeader{Name: f.name, Method: zip.Store}
 		fh.SetMode(f.mode)
-		w, _ := zw.CreateHeader(fh)
-		w.Write(f.body)
+		w, err := zw.CreateHeader(fh)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := w.Write(f.body); err != nil {
+			return nil, err
+		}
 	}
 
-	zw.Close()
-	return buf.Bytes()
+	if err := zw.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 func TestFindInZip(t *testing.T) {
 	// Exec bit set → returned.
-	data := buildZip([]struct {
+	data, err := buildZip([]struct {
 		name string
 		mode os.FileMode
 		body []byte
 	}{{"tool", 0755, []byte("binary")}})
+	if err != nil {
+		t.Fatalf("buildZip exec: %v", err)
+	}
 
 	name, tmp, err := findInZip(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
@@ -117,11 +144,14 @@ func TestFindInZip(t *testing.T) {
 	}
 
 	// No extension, no exec bit → fallback returned.
-	data2 := buildZip([]struct {
+	data2, err := buildZip([]struct {
 		name string
 		mode os.FileMode
 		body []byte
 	}{{"mytool", 0644, []byte("fallback")}})
+	if err != nil {
+		t.Fatalf("buildZip fallback noext: %v", err)
+	}
 
 	name2, tmp2, err := findInZip(bytes.NewReader(data2), int64(len(data2)))
 	if err != nil {
@@ -135,14 +165,39 @@ func TestFindInZip(t *testing.T) {
 	}
 
 	// Extension + no exec bit → no candidates → error.
-	data3 := buildZip([]struct {
+	data3, err := buildZip([]struct {
 		name string
 		mode os.FileMode
 		body []byte
 	}{{"tool.txt", 0644, []byte("text")}})
+	if err != nil {
+		t.Fatalf("buildZip no candidates: %v", err)
+	}
 
 	_, _, err = findInZip(bytes.NewReader(data3), int64(len(data3)))
 	if err == nil {
 		t.Error("findInZip: expected error for archive with no candidates")
+	}
+
+	data4, err := buildZip([]struct {
+		name string
+		mode os.FileMode
+		body []byte
+	}{
+		{"README", 0644, []byte("readme")},
+		{"tool.exe", 0644, []byte("binary")},
+	})
+	if err != nil {
+		t.Fatalf("buildZip exe fallback: %v", err)
+	}
+
+	name4, tmp4, err := findInZip(bytes.NewReader(data4), int64(len(data4)))
+	if err != nil {
+		t.Fatalf("findInZip exe fallback: unexpected error: %v", err)
+	}
+	defer os.Remove(tmp4.Name())
+	defer tmp4.Close()
+	if name4 != "tool.exe" {
+		t.Fatalf("findInZip exe fallback name = %q, want %q", name4, "tool.exe")
 	}
 }

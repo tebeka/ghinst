@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -17,6 +19,7 @@ func TestParseTarget(t *testing.T) {
 	}{
 		{"owner/repo", "owner", "repo", "", false},
 		{"owner/repo@v1.2.3", "owner", "repo", "v1.2.3", false},
+		{"owner/repo@", "", "", "", true},
 		{"nodash", "", "", "", true},
 		{"/repo", "", "", "", true},
 		{"owner/", "", "", "", true},
@@ -109,7 +112,9 @@ func TestFetchRelease(t *testing.T) {
 		},
 	}
 
+	var gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.EscapedPath()
 		json.NewEncoder(w).Encode(want)
 	}))
 	defer srv.Close()
@@ -129,5 +134,91 @@ func TestFetchRelease(t *testing.T) {
 
 	if len(got.Assets) != 1 || got.Assets[0].Name != want.Assets[0].Name {
 		t.Errorf("Assets = %v, want %v", got.Assets, want.Assets)
+	}
+	if gotPath != "/repos/owner/repo/releases/latest" {
+		t.Errorf("request path = %q, want %q", gotPath, "/repos/owner/repo/releases/latest")
+	}
+}
+
+func TestFetchReleaseEscapesTagPathComponent(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.EscapedPath()
+		json.NewEncoder(w).Encode(Release{TagName: "ok"})
+	}))
+	defer srv.Close()
+
+	old := apiBase
+	apiBase = srv.URL
+	defer func() { apiBase = old }()
+
+	tag := "release/2026+build"
+	if _, err := fetchRelease("owner", "repo", tag); err != nil {
+		t.Fatalf("fetchRelease with escaped tag: %v", err)
+	}
+
+	wantPath := "/repos/owner/repo/releases/tags/" + url.PathEscape(tag)
+	if gotPath != wantPath {
+		t.Fatalf("request path = %q, want %q", gotPath, wantPath)
+	}
+}
+
+func TestFetchReleaseNotFoundMessageForLatest(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	old := apiBase
+	apiBase = srv.URL
+	defer func() { apiBase = old }()
+
+	_, err := fetchRelease("owner", "repo", "")
+	if err == nil {
+		t.Fatal("fetchRelease expected error")
+	}
+	if !strings.Contains(err.Error(), "latest release not found for owner/repo") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+	if strings.Contains(err.Error(), "@") {
+		t.Fatalf("latest-release not found error should not include @: %v", err)
+	}
+}
+
+func TestFetchReleaseNotFoundMessageForTag(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	old := apiBase
+	apiBase = srv.URL
+	defer func() { apiBase = old }()
+
+	_, err := fetchRelease("owner", "repo", "v1.2.3")
+	if err == nil {
+		t.Fatal("fetchRelease expected error")
+	}
+	if !strings.Contains(err.Error(), "release not found for owner/repo@v1.2.3") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}
+
+func TestFetchReleaseServerError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	old := apiBase
+	apiBase = srv.URL
+	defer func() { apiBase = old }()
+
+	_, err := fetchRelease("owner", "repo", "")
+	if err == nil {
+		t.Fatal("fetchRelease expected non-nil error")
+	}
+	if !strings.Contains(err.Error(), "GitHub API returned 500") {
+		t.Fatalf("unexpected error message: %v", err)
 	}
 }

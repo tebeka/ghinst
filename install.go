@@ -53,11 +53,17 @@ func download(url string) (*os.File, error) {
 // and symlinks it into <baseDir>/bin/.
 func installBinary(baseDir, owner, repo, tag, binName string, src *os.File) (_ string, err error) {
 	installDir := filepath.Join(baseDir, "ghinst", owner, repo+"@"+tag)
+	installDirPreExisted := true
+	if _, statErr := os.Stat(installDir); os.IsNotExist(statErr) {
+		installDirPreExisted = false
+	} else if statErr != nil {
+		return "", statErr
+	}
 	if err := os.MkdirAll(installDir, 0755); err != nil {
 		return "", err
 	}
 	defer func() {
-		if err != nil {
+		if err != nil && !installDirPreExisted {
 			os.RemoveAll(installDir)
 		}
 	}()
@@ -80,7 +86,10 @@ func installBinary(baseDir, owner, repo, tag, binName string, src *os.File) (_ s
 		os.Remove(tmpName)
 		return "", err
 	}
-	tmp.Close()
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return "", err
+	}
 
 	if err := os.Rename(tmpName, binPath); err != nil {
 		os.Remove(tmpName)
@@ -89,7 +98,9 @@ func installBinary(baseDir, owner, repo, tag, binName string, src *os.File) (_ s
 
 	// Touch the install dir so purge can sort by most recently installed.
 	now := time.Now()
-	os.Chtimes(installDir, now, now)
+	if err := os.Chtimes(installDir, now, now); err != nil {
+		return "", err
+	}
 
 	linkDir := filepath.Join(baseDir, "bin")
 	if err := os.MkdirAll(linkDir, 0755); err != nil {
@@ -97,7 +108,16 @@ func installBinary(baseDir, owner, repo, tag, binName string, src *os.File) (_ s
 	}
 
 	linkPath := filepath.Join(linkDir, binName)
-	os.Remove(linkPath) // replace any existing symlink
+	if info, err := os.Lstat(linkPath); err == nil {
+		if info.Mode()&os.ModeSymlink == 0 {
+			return "", fmt.Errorf("refusing to replace non-symlink %s", linkPath)
+		}
+		if err := os.Remove(linkPath); err != nil {
+			return "", err
+		}
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
 	if err := os.Symlink(binPath, linkPath); err != nil {
 		return "", err
 	}
@@ -112,7 +132,7 @@ func defaultBaseDir() string {
 
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "/usr/local"
+		return ""
 	}
 
 	return filepath.Join(home, ".local")
@@ -124,6 +144,9 @@ func purge(baseDir, owner, repo string) error {
 
 	entries, err := os.ReadDir(ownerDir)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
 		return err
 	}
 
@@ -144,8 +167,12 @@ func purge(baseDir, owner, repo string) error {
 
 	// Sort by modification time, keep the newest.
 	sort.Slice(versions, func(i, j int) bool {
-		iInfo, _ := versions[i].Info()
-		jInfo, _ := versions[j].Info()
+		iInfo, iErr := versions[i].Info()
+		jInfo, jErr := versions[j].Info()
+		if iErr != nil || jErr != nil {
+			// On metadata errors, keep lexical order stable/deterministic.
+			return versions[i].Name() < versions[j].Name()
+		}
 		return iInfo.ModTime().Before(jInfo.ModTime())
 	})
 
