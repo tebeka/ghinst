@@ -1,6 +1,6 @@
 # ghinst
 
-<p align="center"><img src="logo.svg" width="400" alt="ghinst logo"/></p>
+<p align="center"><img src="logo.png" width="400" alt="ghinst logo"/></p>
 
 Install binaries from GitHub releases to `~/.local/bin`.
 
