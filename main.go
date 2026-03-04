@@ -43,10 +43,6 @@ func main() {
 		flag.PrintDefaults()
 	}
 	flag.Parse()
-	if options.baseDir == "" {
-		fmt.Fprintln(os.Stderr, "error: could not determine install base dir; set -dir or GHINST_DIR")
-		os.Exit(1)
-	}
 
 	if options.showVersion {
 		fmt.Printf("%s %s\n", filepath.Base(os.Args[0]), buildVersion())
@@ -61,6 +57,11 @@ func main() {
 	owner, repo, tag, err := parseTarget(flag.Arg(0))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if options.baseDir == "" {
+		fmt.Fprintln(os.Stderr, "error: could not determine install base dir; set -dir or GHINST_DIR")
 		os.Exit(1)
 	}
 
