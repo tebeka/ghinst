@@ -61,6 +61,11 @@ func main() {
 		return
 	}
 
+	if options.baseDir == "" {
+		fmt.Fprintln(os.Stderr, "error: could not determine install base dir; set -dir or GHINST_DIR")
+		os.Exit(1)
+	}
+
 	if options.list {
 		if err := listInstalled(options.baseDir); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -77,11 +82,6 @@ func main() {
 	owner, repo, tag, err := parseTarget(flag.Arg(0))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
-
-	if options.baseDir == "" {
-		fmt.Fprintln(os.Stderr, "error: could not determine install base dir; set -dir or GHINST_DIR")
 		os.Exit(1)
 	}
 

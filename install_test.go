@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,9 +10,40 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"testing"
 )
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+
+	orig := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
+	defer func() { os.Stdout = orig }()
+	defer r.Close()
+
+	done := make(chan string, 1)
+	go func() {
+		var buf bytes.Buffer
+		if _, err := io.Copy(&buf, r); err != nil {
+			done <- fmt.Sprintf("copy error: %v", err)
+			return
+		}
+		done <- buf.String()
+	}()
+
+	fn()
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("close pipe writer: %v", err)
+	}
+	return <-done
+}
 
 func TestDownload(t *testing.T) {
 	want := []byte("hello from server")
@@ -199,6 +231,71 @@ func TestInstallBinaryRefusesReplacingRegularFileInBin(t *testing.T) {
 	}
 	if !bytes.Equal(got, []byte("keep me")) {
 		t.Fatalf("existing regular file at link path should be preserved")
+	}
+}
+
+func TestListInstalledMarksActiveVersions(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	dirs := []string{
+		filepath.Join(tmpDir, "ghinst", "owner", "repo@v1.0.0"),
+		filepath.Join(tmpDir, "ghinst", "owner", "repo@v2.0.0"),
+		filepath.Join(tmpDir, "ghinst", "owner2", "tool@v3.0.0"),
+		filepath.Join(tmpDir, "bin"),
+	}
+	for _, d := range dirs {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatalf("MkdirAll %s: %v", d, err)
+		}
+	}
+
+	activeBin := filepath.Join(tmpDir, "ghinst", "owner", "repo@v2.0.0", "repo")
+	if err := os.WriteFile(activeBin, []byte("bin"), 0755); err != nil {
+		t.Fatalf("WriteFile active binary: %v", err)
+	}
+	if err := os.Symlink(activeBin, filepath.Join(tmpDir, "bin", "repo")); err != nil {
+		t.Fatalf("Symlink active binary: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		if err := listInstalled(tmpDir); err != nil {
+			t.Fatalf("listInstalled: %v", err)
+		}
+	})
+
+	want := strings.Join([]string{
+		"  owner/repo v1.0.0",
+		"* owner/repo v2.0.0",
+		"  owner2/tool v3.0.0",
+		"",
+	}, "\n")
+	if out != want {
+		t.Fatalf("listInstalled output mismatch\n got:\n%q\nwant:\n%q", out, want)
+	}
+}
+
+func TestListInstalledMissingGhinstDirIsNoOp(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	out := captureStdout(t, func() {
+		if err := listInstalled(tmpDir); err != nil {
+			t.Fatalf("listInstalled: %v", err)
+		}
+	})
+	if out != "" {
+		t.Fatalf("expected no output, got %q", out)
+	}
+}
+
+func TestListInstalledReturnsErrorWhenBinPathIsNotDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(tmpDir, "bin"), []byte("not a directory"), 0644); err != nil {
+		t.Fatalf("WriteFile bin: %v", err)
+	}
+
+	if err := listInstalled(tmpDir); err == nil {
+		t.Fatal("listInstalled expected error when bin path is not a directory")
 	}
 }
 

@@ -140,7 +140,12 @@ func defaultBaseDir() string {
 func listInstalled(baseDir string) error {
 	active := map[string]bool{}
 	binDir := filepath.Join(baseDir, "bin")
-	if links, err := os.ReadDir(binDir); err == nil {
+	links, err := os.ReadDir(binDir)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+	} else {
 		for _, l := range links {
 			linkPath := filepath.Join(binDir, l.Name())
 			target, err := os.Readlink(linkPath)
