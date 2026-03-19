@@ -33,4 +33,4 @@ aurs:
     git_url: ssh://aur@aur.archlinux.org/ghinst-bin.git
     package: |-
       install -Dm755 "./ghinst" "${pkgdir}/usr/bin/ghinst"
-      install -Dm644 "./LICENSE" "${pkgdir}/usr/share/licenses/ghinst/LICENSE"
+      install -Dm644 "./LICENSE" "${pkgdir}/usr/share/licenses/ghinst-bin/LICENSE"
