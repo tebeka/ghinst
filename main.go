@@ -16,6 +16,7 @@ var options struct {
 	list        bool
 	force       bool
 	baseDir     string
+	completion  string
 }
 
 func buildVersion() string {
@@ -35,6 +36,7 @@ func buildVersion() string {
 }
 
 func main() {
+	flag.StringVar(&options.completion, "completion", "", "print shell completion script (bash, zsh, fish)")
 	flag.BoolVar(&options.showVersion, "version", false, "print version and exit")
 	flag.BoolVar(&options.doPurge, "purge", false, "remove all but the latest installed version of owner/repo")
 	flag.BoolVar(&options.list, "list", false, "list installed apps")
@@ -45,6 +47,14 @@ func main() {
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+
+	if options.completion != "" {
+		if err := printCompletion(options.completion); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if options.showVersion {
 		fmt.Printf("%s %s\n", filepath.Base(os.Args[0]), buildVersion())
