@@ -223,8 +223,9 @@ func purge(baseDir, owner, repo string) error {
 				continue
 			}
 			dir := filepath.Dir(target)
-			if filepath.Dir(dir) == ownerDir {
-				active = filepath.Base(dir)
+			base := filepath.Base(dir)
+			if filepath.Dir(dir) == ownerDir && strings.HasPrefix(base, repo+"@") {
+				active = base
 				break
 			}
 		}

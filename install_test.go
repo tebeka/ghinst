@@ -248,6 +248,58 @@ func TestPurge(t *testing.T) {
 	}
 }
 
+func TestPurgeOtherRepoLinkedFirst(t *testing.T) {
+	tmpDir := t.TempDir()
+	ownerDir := filepath.Join(tmpDir, "ghinst", "owner")
+
+	v1 := filepath.Join(ownerDir, "repo@v1.0.0")
+	v2 := filepath.Join(ownerDir, "repo@v2.0.0")
+	other := filepath.Join(ownerDir, "other@v1.0.0")
+
+	for _, d := range []string{v1, v2, other} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	binDir := filepath.Join(tmpDir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Link "other" so it appears first alphabetically in bin/.
+	otherBin := filepath.Join(other, "other")
+	if err := os.WriteFile(otherBin, []byte("bin"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(otherBin, filepath.Join(binDir, "other")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Link v2 of "repo".
+	repoBin := filepath.Join(v2, "repo")
+	if err := os.WriteFile(repoBin, []byte("bin"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(repoBin, filepath.Join(binDir, "repo")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := purge(tmpDir, "owner", "repo"); err != nil {
+		t.Fatalf("purge: %v", err)
+	}
+
+	if _, err := os.Stat(v1); !os.IsNotExist(err) {
+		t.Error("v1.0.0 should have been purged")
+	}
+	if _, err := os.Stat(v2); err != nil {
+		t.Error("v2.0.0 (linked) should remain")
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Error("other@v1.0.0 should remain untouched")
+	}
+}
+
 func TestPurgeMissingOwnerDirIsNoOp(t *testing.T) {
 	tmpDir := t.TempDir()
 	if err := purge(tmpDir, "owner", "repo"); err != nil {
