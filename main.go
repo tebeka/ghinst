@@ -13,6 +13,7 @@ import (
 var options struct {
 	showVersion bool
 	doPurge     bool
+	list        bool
 	force       bool
 	baseDir     string
 }
@@ -36,6 +37,7 @@ func buildVersion() string {
 func main() {
 	flag.BoolVar(&options.showVersion, "version", false, "print version and exit")
 	flag.BoolVar(&options.doPurge, "purge", false, "remove all but the latest installed version of owner/repo")
+	flag.BoolVar(&options.list, "list", false, "list installed apps")
 	flag.BoolVar(&options.force, "force", false, "install even if already on the latest version")
 	flag.StringVar(&options.baseDir, "dir", defaultBaseDir(), "base install directory (overrides GHINST_DIR)")
 	flag.Usage = func() {
@@ -46,6 +48,14 @@ func main() {
 
 	if options.showVersion {
 		fmt.Printf("%s %s\n", filepath.Base(os.Args[0]), buildVersion())
+		return
+	}
+
+	if options.list {
+		if err := listInstalled(options.baseDir); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
 		return
 	}
 

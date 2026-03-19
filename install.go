@@ -138,6 +138,55 @@ func defaultBaseDir() string {
 	return filepath.Join(home, ".local")
 }
 
+func listInstalled(baseDir string) error {
+	active := map[string]bool{}
+	binDir := filepath.Join(baseDir, "bin")
+	if links, err := os.ReadDir(binDir); err == nil {
+		for _, l := range links {
+			linkPath := filepath.Join(binDir, l.Name())
+			target, err := os.Readlink(linkPath)
+			if err == nil {
+				active[filepath.Dir(target)] = true
+			}
+		}
+	}
+
+	ghinstDir := filepath.Join(baseDir, "ghinst")
+	owners, err := os.ReadDir(ghinstDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	for _, owner := range owners {
+		if !owner.IsDir() {
+			continue
+		}
+		ownerDir := filepath.Join(ghinstDir, owner.Name())
+		entries, err := os.ReadDir(ownerDir)
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			repo, version, found := strings.Cut(e.Name(), "@")
+			if !found {
+				continue
+			}
+			marker := " "
+			if active[filepath.Join(ownerDir, e.Name())] {
+				marker = "*"
+			}
+			fmt.Printf("%s %s/%s %s\n", marker, owner.Name(), repo, version)
+		}
+	}
+	return nil
+}
+
 // purge removes all but the most recently installed version of owner/repo.
 func purge(baseDir, owner, repo string) error {
 	ownerDir := filepath.Join(baseDir, "ghinst", owner)
