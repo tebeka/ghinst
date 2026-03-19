@@ -38,7 +38,7 @@ func buildVersion() string {
 func main() {
 	flag.StringVar(&options.completion, "completion", "", "print shell completion script (bash, zsh, fish)")
 	flag.BoolVar(&options.showVersion, "version", false, "print version and exit")
-	flag.BoolVar(&options.doPurge, "purge", false, "remove all but the latest installed version of owner/repo")
+	flag.BoolVar(&options.doPurge, "purge", false, "remove all but the currently used version of owner/repo")
 	flag.BoolVar(&options.list, "list", false, "list installed apps")
 	flag.BoolVar(&options.force, "force", false, "install even if already on the latest version")
 	flag.StringVar(&options.baseDir, "dir", defaultBaseDir(), "base install directory (overrides GHINST_DIR)")
