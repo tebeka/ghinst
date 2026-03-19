@@ -11,7 +11,6 @@ import (
 	"runtime"
 	"syscall"
 	"testing"
-	"time"
 )
 
 func TestDownload(t *testing.T) {
@@ -210,20 +209,23 @@ func TestPurge(t *testing.T) {
 	v1 := filepath.Join(ownerDir, "repo@v1.0.0")
 	v2 := filepath.Join(ownerDir, "repo@v2.0.0")
 
-	if err := os.MkdirAll(v1, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(v2, 0755); err != nil {
-		t.Fatal(err)
+	for _, d := range []string{v1, v2} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
 	}
 
-	t1 := time.Now().Add(-time.Hour)
-	t2 := time.Now()
-	if err := os.Chtimes(v1, t1, t1); err != nil {
-		t.Fatalf("Chtimes v1: %v", err)
+	// Simulate v2 being the currently linked version.
+	binPath := filepath.Join(v2, "repo")
+	if err := os.WriteFile(binPath, []byte("bin"), 0755); err != nil {
+		t.Fatal(err)
 	}
-	if err := os.Chtimes(v2, t2, t2); err != nil {
-		t.Fatalf("Chtimes v2: %v", err)
+	binDir := filepath.Join(tmpDir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(binPath, filepath.Join(binDir, "repo")); err != nil {
+		t.Fatal(err)
 	}
 
 	if err := purge(tmpDir, "owner", "repo"); err != nil {

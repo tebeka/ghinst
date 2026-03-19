@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 )
@@ -187,7 +186,7 @@ func listInstalled(baseDir string) error {
 	return nil
 }
 
-// purge removes all but the most recently installed version of owner/repo.
+// purge removes all but the currently linked version of owner/repo.
 func purge(baseDir, owner, repo string) error {
 	ownerDir := filepath.Join(baseDir, "ghinst", owner)
 
@@ -214,18 +213,27 @@ func purge(baseDir, owner, repo string) error {
 		return nil
 	}
 
-	// Sort by modification time, keep the newest.
-	sort.Slice(versions, func(i, j int) bool {
-		iInfo, iErr := versions[i].Info()
-		jInfo, jErr := versions[j].Info()
-		if iErr != nil || jErr != nil {
-			// On metadata errors, keep lexical order stable/deterministic.
-			return versions[i].Name() < versions[j].Name()
+	// Find the currently linked version by resolving symlinks in <baseDir>/bin/.
+	active := ""
+	binDir := filepath.Join(baseDir, "bin")
+	if links, err := os.ReadDir(binDir); err == nil {
+		for _, l := range links {
+			target, err := os.Readlink(filepath.Join(binDir, l.Name()))
+			if err != nil {
+				continue
+			}
+			dir := filepath.Dir(target)
+			if filepath.Dir(dir) == ownerDir {
+				active = filepath.Base(dir)
+				break
+			}
 		}
-		return iInfo.ModTime().Before(jInfo.ModTime())
-	})
+	}
 
-	for _, v := range versions[:len(versions)-1] {
+	for _, v := range versions {
+		if v.Name() == active {
+			continue
+		}
 		dir := filepath.Join(ownerDir, v.Name())
 		if err := os.RemoveAll(dir); err != nil {
 			return err
