@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -173,6 +174,14 @@ func listInstalled(baseDir string) error {
 		if err != nil {
 			return err
 		}
+		sort.Slice(entries, func(i, j int) bool {
+			ri, vi, _ := strings.Cut(entries[i].Name(), "@")
+			rj, vj, _ := strings.Cut(entries[j].Name(), "@")
+			if ri != rj {
+				return ri < rj
+			}
+			return vi > vj
+		})
 		for _, e := range entries {
 			if !e.IsDir() {
 				continue
