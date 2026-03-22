@@ -264,8 +264,8 @@ func TestListInstalledMarksActiveVersions(t *testing.T) {
 	})
 
 	want := strings.Join([]string{
-		"  owner/repo v1.0.0",
 		"* owner/repo v2.0.0",
+		"  owner/repo v1.0.0",
 		"  owner2/tool v3.0.0",
 		"",
 	}, "\n")
