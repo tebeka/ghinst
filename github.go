@@ -166,6 +166,10 @@ func parseTarget(s string) (owner, repo, tag string, err error) {
 		return "", "", "", fmt.Errorf("invalid target %q: expected owner/repo[@version]", s)
 	}
 
+	if err := validateTargetParts(parts[0], parts[1]); err != nil {
+		return "", "", "", err
+	}
+
 	return parts[0], parts[1], tag, nil
 }
 

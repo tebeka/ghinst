@@ -53,15 +53,23 @@ func download(url string) (*os.File, error) {
 // installBinary places the binary under <baseDir>/ghinst/owner/repo@tag/
 // and symlinks it into <baseDir>/bin/.
 func installBinary(baseDir, owner, repo, tag, binName string, src *os.File) (_ string, err error) {
-	installDir := filepath.Join(baseDir, "ghinst", owner, repo+"@"+tag)
+	installDir, _, err := managedInstallDir(baseDir, owner, repo, tag)
+	if err != nil {
+		return "", err
+	}
+
 	installDirPreExisted := true
-	if _, statErr := os.Stat(installDir); os.IsNotExist(statErr) {
+	if _, statErr := os.Lstat(installDir); os.IsNotExist(statErr) {
 		installDirPreExisted = false
 	} else if statErr != nil {
 		return "", statErr
 	}
 
 	if err := os.MkdirAll(installDir, 0755); err != nil {
+		return "", err
+	}
+
+	if err := ensurePathNotSymlink(installDir); err != nil {
 		return "", err
 	}
 
@@ -107,12 +115,19 @@ func installBinary(baseDir, owner, repo, tag, binName string, src *os.File) (_ s
 		return "", err
 	}
 
-	linkDir := filepath.Join(baseDir, "bin")
+	linkDir, linkPath, err := managedLinkPath(baseDir, binName)
+	if err != nil {
+		return "", err
+	}
+
 	if err := os.MkdirAll(linkDir, 0755); err != nil {
 		return "", err
 	}
 
-	linkPath := filepath.Join(linkDir, binName)
+	if err := ensurePathNotSymlink(linkDir); err != nil {
+		return "", err
+	}
+
 	if info, err := os.Lstat(linkPath); err == nil {
 		if info.Mode()&os.ModeSymlink == 0 {
 			return "", fmt.Errorf("refusing to replace non-symlink %s", linkPath)
@@ -161,7 +176,11 @@ func defaultBaseDir() string {
 
 func listInstalled(baseDir string) error {
 	active := map[string]bool{}
-	binDir := filepath.Join(baseDir, "bin")
+	binDir := managedBinDir(baseDir)
+	if err := ensurePathNotSymlink(binDir); err != nil {
+		return err
+	}
+
 	links, err := os.ReadDir(binDir)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -177,7 +196,11 @@ func listInstalled(baseDir string) error {
 		}
 	}
 
-	ghinstDir := filepath.Join(baseDir, "ghinst")
+	ghinstDir := managedGhinstRoot(baseDir)
+	if err := ensurePathNotSymlink(ghinstDir); err != nil {
+		return err
+	}
+
 	owners, err := os.ReadDir(ghinstDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -188,11 +211,19 @@ func listInstalled(baseDir string) error {
 	}
 
 	for _, owner := range owners {
+		if owner.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to use symlinked path %s", filepath.Join(ghinstDir, owner.Name()))
+		}
+
 		if !owner.IsDir() {
 			continue
 		}
 
-		ownerDir := filepath.Join(ghinstDir, owner.Name())
+		ownerDir, err := managedOwnerDir(baseDir, owner.Name())
+		if err != nil {
+			return err
+		}
+
 		entries, err := os.ReadDir(ownerDir)
 		if err != nil {
 			return err
@@ -208,6 +239,10 @@ func listInstalled(baseDir string) error {
 			return vi > vj
 		})
 		for _, e := range entries {
+			if e.Type()&os.ModeSymlink != 0 {
+				return fmt.Errorf("refusing to use symlinked path %s", filepath.Join(ownerDir, e.Name()))
+			}
+
 			if !e.IsDir() {
 				continue
 			}
@@ -222,7 +257,7 @@ func listInstalled(baseDir string) error {
 				marker = "*"
 			}
 
-			fmt.Printf("%s %s/%s %s\n", marker, owner.Name(), repo, version)
+			fmt.Printf("%s %s/%s %s\n", marker, owner.Name(), repo, decodeTagFromPathComponent(version))
 		}
 	}
 
@@ -231,7 +266,18 @@ func listInstalled(baseDir string) error {
 
 // purge removes all but the currently linked version of owner/repo.
 func purge(baseDir, owner, repo string) error {
-	ownerDir := filepath.Join(baseDir, "ghinst", owner)
+	if err := validateTargetParts(owner, repo); err != nil {
+		return err
+	}
+
+	ownerDir, err := managedOwnerDir(baseDir, owner)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+
+		return err
+	}
 
 	entries, err := os.ReadDir(ownerDir)
 	if err != nil {
@@ -244,6 +290,10 @@ func purge(baseDir, owner, repo string) error {
 
 	var versions []os.DirEntry
 	for _, e := range entries {
+		if e.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to use symlinked path %s", filepath.Join(ownerDir, e.Name()))
+		}
+
 		if !e.IsDir() {
 			continue
 		}
@@ -260,7 +310,11 @@ func purge(baseDir, owner, repo string) error {
 
 	// Find the currently linked version by resolving symlinks in <baseDir>/bin/.
 	active := ""
-	binDir := filepath.Join(baseDir, "bin")
+	binDir := managedBinDir(baseDir)
+	if err := ensurePathNotSymlink(binDir); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+
 	if links, err := os.ReadDir(binDir); err == nil {
 		for _, l := range links {
 			target, err := os.Readlink(filepath.Join(binDir, l.Name()))
@@ -286,7 +340,15 @@ func purge(baseDir, owner, repo string) error {
 			continue
 		}
 
-		dir := filepath.Join(ownerDir, v.Name())
+		dir, err := managedJoin(ownerDir, v.Name())
+		if err != nil {
+			return err
+		}
+
+		if err := ensurePathNotSymlink(dir); err != nil {
+			return err
+		}
+
 		if err := os.RemoveAll(dir); err != nil {
 			return err
 		}

@@ -171,7 +171,7 @@ func TestInstallBinary(t *testing.T) {
 		t.Fatalf("installBinary: %v", err)
 	}
 
-	binPath := filepath.Join(tmpDir, "ghinst", "owner", "repo@v1.0.0", "tool")
+	binPath := filepath.Join(tmpDir, "ghinst", "owner", "repo@"+encodeTagForPath("v1.0.0"), "tool")
 	info, err := os.Stat(binPath)
 	if err != nil {
 		t.Fatalf("binary not found: %v", err)
@@ -188,6 +188,79 @@ func TestInstallBinary(t *testing.T) {
 
 	if target != binPath {
 		t.Errorf("symlink target = %q, want %q", target, binPath)
+	}
+}
+
+func TestInstallBinaryEncodesSlashyTagsAndListDisplaysDecodedVersion(t *testing.T) {
+	tmpDir := t.TempDir()
+	tag := "release/2026 build"
+
+	src, err := writeTempFile(bytes.NewReader([]byte("binary content")))
+	if err != nil {
+		t.Fatalf("writeTempFile: %v", err)
+	}
+
+	defer os.Remove(src.Name())
+	defer src.Close()
+
+	linkPath, err := installBinary(tmpDir, "owner", "repo", tag, "tool", src)
+	if err != nil {
+		t.Fatalf("installBinary: %v", err)
+	}
+
+	encodedDir := filepath.Join(tmpDir, "ghinst", "owner", "repo@"+encodeTagForPath(tag))
+	if _, err := os.Stat(filepath.Join(encodedDir, "tool")); err != nil {
+		t.Fatalf("encoded install path missing binary: %v", err)
+	}
+
+	target, err := os.Readlink(linkPath)
+	if err != nil {
+		t.Fatalf("Readlink: %v", err)
+	}
+
+	if target != filepath.Join(encodedDir, "tool") {
+		t.Fatalf("symlink target = %q, want %q", target, filepath.Join(encodedDir, "tool"))
+	}
+
+	out := captureStdout(t, func() {
+		if err := listInstalled(tmpDir); err != nil {
+			t.Fatalf("listInstalled: %v", err)
+		}
+	})
+
+	want := "* owner/repo release/2026 build\n"
+	if out != want {
+		t.Fatalf("listInstalled output mismatch\n got:\n%q\nwant:\n%q", out, want)
+	}
+}
+
+func TestInstallBinaryRejectsSymlinkedManagedRoot(t *testing.T) {
+	tmpDir := t.TempDir()
+	external := t.TempDir()
+
+	if err := os.Symlink(external, filepath.Join(tmpDir, "ghinst")); err != nil {
+		t.Fatalf("Symlink ghinst root: %v", err)
+	}
+
+	src, err := writeTempFile(bytes.NewReader([]byte("binary content")))
+	if err != nil {
+		t.Fatalf("writeTempFile: %v", err)
+	}
+
+	defer os.Remove(src.Name())
+	defer src.Close()
+
+	if _, err := installBinary(tmpDir, "owner", "repo", "v1.0.0", "tool", src); err == nil {
+		t.Fatal("installBinary expected error for symlinked managed root")
+	}
+
+	entries, err := os.ReadDir(external)
+	if err != nil {
+		t.Fatalf("ReadDir external: %v", err)
+	}
+
+	if len(entries) != 0 {
+		t.Fatalf("external directory should remain untouched, got %d entries", len(entries))
 	}
 }
 
@@ -212,7 +285,7 @@ func TestInstallBinaryReplacesRunningBinaryLinux(t *testing.T) {
 		t.Fatalf("installBinary initial: %v", err)
 	}
 
-	binPath := filepath.Join(tmpDir, "ghinst", owner, repo+"@"+tag, binName)
+	binPath := filepath.Join(tmpDir, "ghinst", owner, repo+"@"+encodeTagForPath(tag), binName)
 	cmd := exec.Command(binPath)
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start running binary: %v", err)
@@ -263,7 +336,7 @@ func TestInstallBinaryCleanupOnRenameFailure(t *testing.T) {
 	tmpDir := t.TempDir()
 	owner, repo, tag, binName := "owner", "repo", "v1.0.0", "tool"
 
-	installDir := filepath.Join(tmpDir, "ghinst", owner, repo+"@"+tag)
+	installDir := filepath.Join(tmpDir, "ghinst", owner, repo+"@"+encodeTagForPath(tag))
 	if err := os.MkdirAll(filepath.Join(installDir, binName), 0755); err != nil {
 		t.Fatalf("setup installDir: %v", err)
 	}
@@ -288,7 +361,7 @@ func TestInstallBinaryCleanupOnRenameFailure(t *testing.T) {
 		t.Fatalf("pre-existing install content should be preserved, stat err=%v info=%v", err, info)
 	}
 
-	tmpMatches, err := filepath.Glob(filepath.Join(tmpDir, "ghinst", owner, repo+"@"+tag, ".tmp-*"))
+	tmpMatches, err := filepath.Glob(filepath.Join(tmpDir, "ghinst", owner, repo+"@"+encodeTagForPath(tag), ".tmp-*"))
 	if err != nil {
 		t.Fatalf("Glob temp files: %v", err)
 	}
@@ -634,5 +707,45 @@ func TestPurgeMissingOwnerDirIsNoOp(t *testing.T) {
 	tmpDir := t.TempDir()
 	if err := purge(tmpDir, "owner", "repo"); err != nil {
 		t.Fatalf("purge missing owner dir should be no-op: %v", err)
+	}
+}
+
+func TestPurgeRejectsSymlinkedOwnerDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	external := t.TempDir()
+
+	for _, dir := range []string{
+		filepath.Join(external, "repo@"+encodeTagForPath("v1.0.0")),
+		filepath.Join(external, "repo@"+encodeTagForPath("v2.0.0")),
+	} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatalf("MkdirAll %s: %v", dir, err)
+		}
+	}
+
+	if err := os.MkdirAll(filepath.Join(tmpDir, "ghinst"), 0755); err != nil {
+		t.Fatalf("MkdirAll ghinst root: %v", err)
+	}
+
+	if err := os.Symlink(external, filepath.Join(tmpDir, "ghinst", "owner")); err != nil {
+		t.Fatalf("Symlink owner dir: %v", err)
+	}
+
+	err := purge(tmpDir, "owner", "repo")
+	if err == nil {
+		t.Fatal("purge expected error for symlinked owner dir")
+	}
+
+	if !strings.Contains(err.Error(), "refusing to use symlinked path") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, dir := range []string{
+		filepath.Join(external, "repo@"+encodeTagForPath("v1.0.0")),
+		filepath.Join(external, "repo@"+encodeTagForPath("v2.0.0")),
+	} {
+		if _, err := os.Stat(dir); err != nil {
+			t.Fatalf("expected external dir %s to remain: %v", dir, err)
+		}
 	}
 }

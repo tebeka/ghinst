@@ -103,7 +103,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	installDir := filepath.Join(options.baseDir, "ghinst", owner, repo+"@"+release.TagName)
+	installDir, _, err := managedInstallDir(options.baseDir, owner, repo, release.TagName)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: resolving install directory: %v\n", err)
+		os.Exit(1)
+	}
+
 	if !options.force {
 		healthy, err := isHealthyInstallDir(installDir)
 		if err != nil {

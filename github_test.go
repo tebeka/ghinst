@@ -43,6 +43,9 @@ func TestParseTarget(t *testing.T) {
 		{"nodash", "", "", "", true},
 		{"/repo", "", "", "", true},
 		{"owner/", "", "", "", true},
+		{"../repo", "", "", "", true},
+		{"owner/re/po", "", "", "", true},
+		{"owner/..", "", "", "", true},
 	}
 
 	for _, tc := range tests {
