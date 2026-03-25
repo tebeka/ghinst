@@ -119,15 +119,29 @@ func installBinary(baseDir, owner, repo, tag, binName string, src *os.File) (_ s
 		if info.Mode()&os.ModeSymlink == 0 {
 			return "", fmt.Errorf("refusing to replace non-symlink %s", linkPath)
 		}
-
-		if err := os.Remove(linkPath); err != nil {
-			return "", err
-		}
 	} else if !os.IsNotExist(err) {
 		return "", err
 	}
 
-	if err := os.Symlink(binPath, linkPath); err != nil {
+	tmpLink, err := os.CreateTemp(linkDir, "."+binName+".tmp-*")
+	if err != nil {
+		return "", err
+	}
+	tmpLinkPath := tmpLink.Name()
+	if err := tmpLink.Close(); err != nil {
+		os.Remove(tmpLinkPath)
+		return "", err
+	}
+	if err := os.Remove(tmpLinkPath); err != nil {
+		return "", err
+	}
+	defer os.Remove(tmpLinkPath)
+
+	if err := os.Symlink(binPath, tmpLinkPath); err != nil {
+		return "", err
+	}
+
+	if err := os.Rename(tmpLinkPath, linkPath); err != nil {
 		return "", err
 	}
 

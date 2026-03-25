@@ -274,6 +274,55 @@ func TestInstallBinaryRefusesReplacingRegularFileInBin(t *testing.T) {
 	}
 }
 
+func TestInstallBinaryPreservesExistingSymlinkWhenReplacementSetupFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory permissions for symlink creation are not reliable on Windows")
+	}
+
+	tmpDir := t.TempDir()
+
+	src, err := writeTempFile(bytes.NewReader([]byte("binary content")))
+	if err != nil {
+		t.Fatalf("writeTempFile: %v", err)
+	}
+
+	defer os.Remove(src.Name())
+	defer src.Close()
+
+	linkDir := filepath.Join(tmpDir, "bin")
+	if err := os.MkdirAll(linkDir, 0755); err != nil {
+		t.Fatalf("MkdirAll bin: %v", err)
+	}
+
+	oldTarget := filepath.Join(tmpDir, "existing-tool")
+	if err := os.WriteFile(oldTarget, []byte("keep me"), 0755); err != nil {
+		t.Fatalf("WriteFile old target: %v", err)
+	}
+
+	linkPath := filepath.Join(linkDir, "tool")
+	if err := os.Symlink(oldTarget, linkPath); err != nil {
+		t.Fatalf("Symlink existing linkPath: %v", err)
+	}
+
+	if err := os.Chmod(linkDir, 0555); err != nil {
+		t.Fatalf("Chmod bin dir: %v", err)
+	}
+	defer os.Chmod(linkDir, 0755)
+
+	if _, err := installBinary(tmpDir, "owner", "repo", "v1.0.0", "tool", src); err == nil {
+		t.Fatal("installBinary expected error when temporary symlink cannot be created")
+	}
+
+	target, err := os.Readlink(linkPath)
+	if err != nil {
+		t.Fatalf("Readlink existing linkPath: %v", err)
+	}
+
+	if target != oldTarget {
+		t.Fatalf("existing symlink target = %q, want %q", target, oldTarget)
+	}
+}
+
 func TestListInstalledMarksActiveVersions(t *testing.T) {
 	tmpDir := t.TempDir()
 
