@@ -138,7 +138,7 @@ func TestFetchRelease(t *testing.T) {
 	want := Release{
 		TagName: "v1.2.3",
 		Assets: []Asset{
-			{Name: "tool_linux_amd64.tar.gz", BrowserDownloadURL: "http://example.com/dl"},
+			{Name: "tool_linux_amd64.tar.gz", BrowserDownloadURL: "http://example.com/dl", Digest: "sha256:abc123"},
 		},
 	}
 
@@ -162,7 +162,7 @@ func TestFetchRelease(t *testing.T) {
 		t.Errorf("TagName = %q, want %q", got.TagName, want.TagName)
 	}
 
-	if len(got.Assets) != 1 || got.Assets[0].Name != want.Assets[0].Name {
+	if len(got.Assets) != 1 || got.Assets[0].Name != want.Assets[0].Name || got.Assets[0].Digest != want.Assets[0].Digest {
 		t.Errorf("Assets = %v, want %v", got.Assets, want.Assets)
 	}
 

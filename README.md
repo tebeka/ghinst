@@ -28,7 +28,7 @@ ghinst junegunn/fzf@v0.54.0
 
 ## How It Works
 
-`ghinst` fetches the release from the GitHub API, selects the asset matching your OS and architecture, downloads it, extracts the binary, and installs it to `~/.local/ghinst/owner/repo@version/`. A symlink is created in `~/.local/bin/`.
+`ghinst` fetches the release from the GitHub API, selects the asset matching your OS and architecture, downloads it, verifies the GitHub-provided checksum when available, extracts the binary, and installs it to `~/.local/ghinst/owner/repo@version/`. A symlink is created in `~/.local/bin/`. If GitHub does not provide a checksum for the asset, `ghinst` prints a warning and continues.
 
 By default, downloads are limited to `200 MiB`, and extracted binaries are limited to `100 MiB`. Use `-max-size` to lower or raise the download limit:
 

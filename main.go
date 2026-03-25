@@ -156,6 +156,11 @@ func main() {
 	defer os.Remove(tmp.Name())
 	defer tmp.Close()
 
+	if err := verifyAssetDigest(asset, tmp, os.Stderr); err != nil {
+		fmt.Fprintf(os.Stderr, "error: verifying checksum: %v\n", err)
+		os.Exit(1)
+	}
+
 	maxExtractedSize := defaultMaxExtractedSizeBytes
 	if maxAssetSize < maxExtractedSize {
 		maxExtractedSize = maxAssetSize
