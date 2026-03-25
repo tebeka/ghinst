@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 )
 
 type Release struct {
@@ -36,6 +37,7 @@ var archAliases = map[string][]string{
 var archiveExts = []string{".tar.gz", ".tgz", ".tar.bz2", ".tar.xz", ".zip"}
 
 var apiBase = "https://api.github.com"
+var httpClient = &http.Client{Timeout: 30 * time.Second}
 
 func fetchRelease(owner, repo, tag string) (Release, error) {
 	ownerPath := url.PathEscape(owner)
@@ -56,7 +58,7 @@ func fetchRelease(owner, repo, tag string) (Release, error) {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return Release{}, err
 	}

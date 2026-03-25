@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +15,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"testing/synctest"
 )
 
 func captureStdout(t *testing.T, fn func()) string {
@@ -72,6 +75,24 @@ func TestDownload(t *testing.T) {
 	if !bytes.Equal(got, want) {
 		t.Errorf("download content = %q, want %q", got, want)
 	}
+}
+
+func TestDownloadTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		setTestHTTPTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			<-req.Context().Done()
+			return nil, req.Context().Err()
+		}))
+
+		_, err := download("http://example.com/dl")
+		if err == nil {
+			t.Fatal("download expected timeout error")
+		}
+
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("download timeout error = %v, want %v", err, context.DeadlineExceeded)
+		}
+	})
 }
 
 func TestInstallBinary(t *testing.T) {

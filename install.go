@@ -21,7 +21,7 @@ func download(url string) (*os.File, error) {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -38,11 +38,13 @@ func download(url string) (*os.File, error) {
 	}
 
 	if _, err := io.Copy(tmp, resp.Body); err != nil {
+		tmp.Close()
 		os.Remove(tmp.Name())
 		return nil, err
 	}
 
 	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		tmp.Close()
 		os.Remove(tmp.Name())
 		return nil, err
 	}

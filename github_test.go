@@ -1,13 +1,32 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+	"testing/synctest"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
+
+func setTestHTTPTransport(t *testing.T, transport http.RoundTripper) {
+	t.Helper()
+
+	old := httpClient.Transport
+	httpClient.Transport = transport
+	t.Cleanup(func() {
+		httpClient.Transport = old
+	})
+}
 
 func TestParseTarget(t *testing.T) {
 	tests := []struct {
@@ -233,4 +252,22 @@ func TestFetchReleaseServerError(t *testing.T) {
 	if !strings.Contains(err.Error(), "GitHub API returned 500") {
 		t.Fatalf("unexpected error message: %v", err)
 	}
+}
+
+func TestFetchReleaseTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		setTestHTTPTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			<-req.Context().Done()
+			return nil, req.Context().Err()
+		}))
+
+		_, err := fetchRelease("owner", "repo", "")
+		if err == nil {
+			t.Fatal("fetchRelease expected timeout error")
+		}
+
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("fetchRelease timeout error = %v, want context deadline exceeded", err)
+		}
+	})
 }
