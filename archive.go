@@ -22,6 +22,7 @@ func extractBinary(f *os.File, assetName string) (string, *os.File, error) {
 		if err != nil {
 			return "", nil, err
 		}
+
 		defer gz.Close()
 		return findInTar(tar.NewReader(gz))
 
@@ -33,6 +34,7 @@ func extractBinary(f *os.File, assetName string) (string, *os.File, error) {
 		if err != nil {
 			return "", nil, err
 		}
+
 		return findInZip(f, info.Size())
 	}
 
@@ -46,6 +48,7 @@ func findInTar(tr *tar.Reader) (string, *os.File, error) {
 		if err == io.EOF {
 			break
 		}
+
 		if err != nil {
 			return "", nil, err
 		}
@@ -89,10 +92,12 @@ func findInZip(r io.ReaderAt, size int64) (string, *os.File, error) {
 			execMatch = f
 			break
 		}
+
 		if ext == ".exe" && exeFallback == nil {
 			exeFallback = f
 			continue
 		}
+
 		if ext == "" && noExtFallback == nil {
 			noExtFallback = f
 		}
@@ -102,6 +107,7 @@ func findInZip(r io.ReaderAt, size int64) (string, *os.File, error) {
 	if best == nil {
 		best = exeFallback
 	}
+
 	if best == nil {
 		best = noExtFallback
 	}
@@ -114,6 +120,7 @@ func findInZip(r io.ReaderAt, size int64) (string, *os.File, error) {
 	if err != nil {
 		return "", nil, err
 	}
+
 	defer rc.Close()
 
 	tmp, err := writeTempFile(rc)

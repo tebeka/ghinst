@@ -26,9 +26,11 @@ func buildTarGz(files []struct {
 			Mode:     f.mode,
 			Size:     int64(len(f.body)),
 		}
+
 		if err := tw.WriteHeader(hdr); err != nil {
 			return nil, err
 		}
+
 		if _, err := tw.Write(f.body); err != nil {
 			return nil, err
 		}
@@ -37,9 +39,11 @@ func buildTarGz(files []struct {
 	if err := tw.Close(); err != nil {
 		return nil, err
 	}
+
 	if err := gw.Close(); err != nil {
 		return nil, err
 	}
+
 	return buf.Bytes(), nil
 }
 
@@ -63,6 +67,7 @@ func TestFindInTar(t *testing.T) {
 	if err != nil {
 		t.Fatalf("findInTar: unexpected error: %v", err)
 	}
+
 	defer os.Remove(tmp.Name())
 	defer tmp.Close()
 
@@ -89,6 +94,7 @@ func TestFindInTar(t *testing.T) {
 	if err != nil {
 		t.Fatalf("gzip.NewReader no-exec: %v", err)
 	}
+
 	_, _, err = findInTar(tar.NewReader(gr2))
 	if err == nil {
 		t.Error("findInTar: expected error for archive with no executables")
@@ -110,6 +116,7 @@ func buildZip(files []struct {
 		if err != nil {
 			return nil, err
 		}
+
 		if _, err := w.Write(f.body); err != nil {
 			return nil, err
 		}
@@ -118,6 +125,7 @@ func buildZip(files []struct {
 	if err := zw.Close(); err != nil {
 		return nil, err
 	}
+
 	return buf.Bytes(), nil
 }
 
@@ -136,6 +144,7 @@ func TestFindInZip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("findInZip exec: unexpected error: %v", err)
 	}
+
 	defer os.Remove(tmp.Name())
 	defer tmp.Close()
 
@@ -157,6 +166,7 @@ func TestFindInZip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("findInZip fallback: unexpected error: %v", err)
 	}
+
 	defer os.Remove(tmp2.Name())
 	defer tmp2.Close()
 
@@ -195,6 +205,7 @@ func TestFindInZip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("findInZip exe fallback: unexpected error: %v", err)
 	}
+
 	defer os.Remove(tmp4.Name())
 	defer tmp4.Close()
 	if name4 != "tool.exe" {

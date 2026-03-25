@@ -60,14 +60,17 @@ func fetchRelease(owner, repo, tag string) (Release, error) {
 	if err != nil {
 		return Release{}, err
 	}
+
 	defer resp.Body.Close()
 
 	if resp.StatusCode == 404 {
 		if tag == "" {
 			return Release{}, fmt.Errorf("latest release not found for %s/%s", owner, repo)
 		}
+
 		return Release{}, fmt.Errorf("release not found for %s/%s@%s", owner, repo, tag)
 	}
+
 	if resp.StatusCode != 200 {
 		return Release{}, fmt.Errorf("GitHub API returned %d", resp.StatusCode)
 	}
@@ -116,10 +119,12 @@ func parseTarget(s string) (owner, repo, tag string, err error) {
 	if strings.Contains(s, "@") && tag == "" {
 		return "", "", "", fmt.Errorf("invalid target %q: empty version after @", s)
 	}
+
 	parts := strings.SplitN(slug, "/", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return "", "", "", fmt.Errorf("invalid target %q: expected owner/repo[@version]", s)
 	}
+
 	return parts[0], parts[1], tag, nil
 }
 
@@ -129,6 +134,7 @@ func isArchive(name string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -138,5 +144,6 @@ func matchesAny(s string, phrases []string) bool {
 			return true
 		}
 	}
+
 	return false
 }

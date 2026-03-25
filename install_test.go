@@ -23,6 +23,7 @@ func captureStdout(t *testing.T, fn func()) string {
 	if err != nil {
 		t.Fatalf("os.Pipe: %v", err)
 	}
+
 	os.Stdout = w
 	defer func() { os.Stdout = orig }()
 	defer r.Close()
@@ -34,6 +35,7 @@ func captureStdout(t *testing.T, fn func()) string {
 			done <- fmt.Sprintf("copy error: %v", err)
 			return
 		}
+
 		done <- buf.String()
 	}()
 
@@ -42,6 +44,7 @@ func captureStdout(t *testing.T, fn func()) string {
 	if err := w.Close(); err != nil {
 		t.Fatalf("close pipe writer: %v", err)
 	}
+
 	return <-done
 }
 
@@ -57,6 +60,7 @@ func TestDownload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("download: unexpected error: %v", err)
 	}
+
 	defer os.Remove(tmp.Name())
 	defer tmp.Close()
 
@@ -78,6 +82,7 @@ func TestInstallBinary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("writeTempFile: %v", err)
 	}
+
 	defer os.Remove(src.Name())
 	defer src.Close()
 
@@ -91,6 +96,7 @@ func TestInstallBinary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("binary not found: %v", err)
 	}
+
 	if info.Mode()&0111 == 0 {
 		t.Error("binary is not executable")
 	}
@@ -99,6 +105,7 @@ func TestInstallBinary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readlink: %v", err)
 	}
+
 	if target != binPath {
 		t.Errorf("symlink target = %q, want %q", target, binPath)
 	}
@@ -117,6 +124,7 @@ func TestInstallBinaryReplacesRunningBinaryLinux(t *testing.T) {
 	if err != nil {
 		t.Fatalf("writeTempFile initial: %v", err)
 	}
+
 	defer os.Remove(src1.Name())
 	defer src1.Close()
 
@@ -129,10 +137,12 @@ func TestInstallBinaryReplacesRunningBinaryLinux(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start running binary: %v", err)
 	}
+
 	defer cmd.Wait()
 	if cmd.Process == nil {
 		t.Fatal("running process should have a PID")
 	}
+
 	if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
 		t.Fatalf("running process is not alive: %v", err)
 	}
@@ -142,6 +152,7 @@ func TestInstallBinaryReplacesRunningBinaryLinux(t *testing.T) {
 	if err != nil {
 		t.Fatalf("writeTempFile replacement: %v", err)
 	}
+
 	defer os.Remove(src2.Name())
 	defer src2.Close()
 
@@ -153,6 +164,7 @@ func TestInstallBinaryReplacesRunningBinaryLinux(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile replaced binary: %v", err)
 	}
+
 	if !bytes.Equal(got, replacement) {
 		t.Fatalf("replaced binary content mismatch")
 	}
@@ -161,6 +173,7 @@ func TestInstallBinaryReplacesRunningBinaryLinux(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stat replaced binary: %v", err)
 	}
+
 	if info.Mode()&0111 == 0 {
 		t.Error("replaced binary is not executable")
 	}
@@ -179,6 +192,7 @@ func TestInstallBinaryCleanupOnRenameFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("writeTempFile: %v", err)
 	}
+
 	defer os.Remove(src.Name())
 	defer src.Close()
 
@@ -189,6 +203,7 @@ func TestInstallBinaryCleanupOnRenameFailure(t *testing.T) {
 	if _, err := os.Stat(installDir); err != nil {
 		t.Fatalf("installDir should remain on failure when it pre-existed, stat err=%v", err)
 	}
+
 	if info, err := os.Stat(filepath.Join(installDir, binName)); err != nil || !info.IsDir() {
 		t.Fatalf("pre-existing install content should be preserved, stat err=%v info=%v", err, info)
 	}
@@ -197,6 +212,7 @@ func TestInstallBinaryCleanupOnRenameFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Glob temp files: %v", err)
 	}
+
 	if len(tmpMatches) != 0 {
 		t.Fatalf("temp files were not cleaned up: %v", tmpMatches)
 	}
@@ -209,6 +225,7 @@ func TestInstallBinaryRefusesReplacingRegularFileInBin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("writeTempFile: %v", err)
 	}
+
 	defer os.Remove(src.Name())
 	defer src.Close()
 
@@ -216,6 +233,7 @@ func TestInstallBinaryRefusesReplacingRegularFileInBin(t *testing.T) {
 	if err := os.MkdirAll(linkDir, 0755); err != nil {
 		t.Fatalf("MkdirAll bin: %v", err)
 	}
+
 	linkPath := filepath.Join(linkDir, "tool")
 	if err := os.WriteFile(linkPath, []byte("keep me"), 0644); err != nil {
 		t.Fatalf("WriteFile existing linkPath: %v", err)
@@ -229,6 +247,7 @@ func TestInstallBinaryRefusesReplacingRegularFileInBin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile existing linkPath: %v", err)
 	}
+
 	if !bytes.Equal(got, []byte("keep me")) {
 		t.Fatalf("existing regular file at link path should be preserved")
 	}
@@ -243,6 +262,7 @@ func TestListInstalledMarksActiveVersions(t *testing.T) {
 		filepath.Join(tmpDir, "ghinst", "owner2", "tool@v3.0.0"),
 		filepath.Join(tmpDir, "bin"),
 	}
+
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0755); err != nil {
 			t.Fatalf("MkdirAll %s: %v", d, err)
@@ -253,6 +273,7 @@ func TestListInstalledMarksActiveVersions(t *testing.T) {
 	if err := os.WriteFile(activeBin, []byte("bin"), 0755); err != nil {
 		t.Fatalf("WriteFile active binary: %v", err)
 	}
+
 	if err := os.Symlink(activeBin, filepath.Join(tmpDir, "bin", "repo")); err != nil {
 		t.Fatalf("Symlink active binary: %v", err)
 	}
@@ -317,10 +338,12 @@ func TestPurge(t *testing.T) {
 	if err := os.WriteFile(binPath, []byte("bin"), 0755); err != nil {
 		t.Fatal(err)
 	}
+
 	binDir := filepath.Join(tmpDir, "bin")
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.Symlink(binPath, filepath.Join(binDir, "repo")); err != nil {
 		t.Fatal(err)
 	}
@@ -332,6 +355,7 @@ func TestPurge(t *testing.T) {
 	if _, err := os.Stat(v1); !os.IsNotExist(err) {
 		t.Error("v1.0.0 should have been purged")
 	}
+
 	if _, err := os.Stat(v2); err != nil {
 		t.Error("v2.0.0 should remain")
 	}
@@ -340,6 +364,7 @@ func TestPurge(t *testing.T) {
 	if err := purge(tmpDir, "owner", "repo"); err != nil {
 		t.Fatalf("purge single version: %v", err)
 	}
+
 	if _, err := os.Stat(v2); err != nil {
 		t.Error("v2.0.0 should still remain after no-op purge")
 	}
@@ -369,6 +394,7 @@ func TestPurgeOtherRepoLinkedFirst(t *testing.T) {
 	if err := os.WriteFile(otherBin, []byte("bin"), 0755); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.Symlink(otherBin, filepath.Join(binDir, "other")); err != nil {
 		t.Fatal(err)
 	}
@@ -378,6 +404,7 @@ func TestPurgeOtherRepoLinkedFirst(t *testing.T) {
 	if err := os.WriteFile(repoBin, []byte("bin"), 0755); err != nil {
 		t.Fatal(err)
 	}
+
 	if err := os.Symlink(repoBin, filepath.Join(binDir, "repo")); err != nil {
 		t.Fatal(err)
 	}
@@ -389,9 +416,11 @@ func TestPurgeOtherRepoLinkedFirst(t *testing.T) {
 	if _, err := os.Stat(v1); !os.IsNotExist(err) {
 		t.Error("v1.0.0 should have been purged")
 	}
+
 	if _, err := os.Stat(v2); err != nil {
 		t.Error("v2.0.0 (linked) should remain")
 	}
+
 	if _, err := os.Stat(other); err != nil {
 		t.Error("other@v1.0.0 should remain untouched")
 	}

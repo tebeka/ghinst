@@ -46,6 +46,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "usage: %s owner/repo[@version]\n", filepath.Base(os.Args[0]))
 		flag.PrintDefaults()
 	}
+
 	flag.Parse()
 
 	if options.completion != "" {
@@ -53,6 +54,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
 		}
+
 		return
 	}
 
@@ -71,6 +73,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
 		}
+
 		return
 	}
 
@@ -90,6 +93,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
 		}
+
 		return
 	}
 
@@ -106,6 +110,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "error: checking existing install: %v\n", err)
 			os.Exit(1)
 		}
+
 		if healthy {
 			fmt.Printf("%s/%s is already at %s\n", owner, repo, release.TagName)
 			return
@@ -119,6 +124,7 @@ func main() {
 		for _, a := range release.Assets {
 			fmt.Fprintf(os.Stderr, "  %s\n", a.Name)
 		}
+
 		os.Exit(1)
 	}
 
@@ -127,6 +133,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: downloading: %v\n", err)
 		os.Exit(1)
 	}
+
 	defer os.Remove(tmp.Name())
 	defer tmp.Close()
 
@@ -135,6 +142,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: extracting: %v\n", err)
 		os.Exit(1)
 	}
+
 	defer os.Remove(binFile.Name())
 	defer binFile.Close()
 
@@ -152,9 +160,11 @@ func isHealthyInstallDir(installDir string) (bool, error) {
 	if os.IsNotExist(err) {
 		return false, nil
 	}
+
 	if err != nil {
 		return false, err
 	}
+
 	if !info.IsDir() {
 		return false, fmt.Errorf("install path is not a directory: %s", installDir)
 	}
@@ -168,13 +178,16 @@ func isHealthyInstallDir(installDir string) (bool, error) {
 		if entry.IsDir() {
 			continue
 		}
+
 		fi, err := entry.Info()
 		if err != nil {
 			continue
 		}
+
 		if fi.Mode().IsRegular() && fi.Mode()&0111 != 0 {
 			return true, nil
 		}
 	}
+
 	return false, nil
 }

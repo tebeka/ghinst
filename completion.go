@@ -19,10 +19,12 @@ func printCompletion(shell string) error {
 	if !ok {
 		return fmt.Errorf("unknown shell %q; supported: bash, zsh, fish", shell)
 	}
+
 	data, err := compFS.ReadFile(path)
 	if err != nil {
 		return err
 	}
+
 	fmt.Print(string(data))
 	return nil
 }

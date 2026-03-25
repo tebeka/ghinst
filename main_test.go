@@ -16,13 +16,16 @@ func TestMainListRequiresBaseDir(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected non-zero exit status")
 	}
+
 	exitErr, ok := err.(*exec.ExitError)
 	if !ok {
 		t.Fatalf("expected *exec.ExitError, got %T (%v)", err, err)
 	}
+
 	if exitErr.ExitCode() != 1 {
 		t.Fatalf("exit code = %d, want 1\noutput:\n%s", exitErr.ExitCode(), out)
 	}
+
 	if !strings.Contains(string(out), "could not determine install base dir") {
 		t.Fatalf("expected base-dir validation error, got output:\n%s", out)
 	}
@@ -39,6 +42,7 @@ func TestMainListRequiresBaseDirHelper(t *testing.T) {
 			break
 		}
 	}
+
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 	main()
 }

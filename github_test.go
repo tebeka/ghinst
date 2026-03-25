@@ -31,12 +31,15 @@ func TestParseTarget(t *testing.T) {
 			if err == nil {
 				t.Errorf("parseTarget(%q) expected error, got nil", tc.input)
 			}
+
 			continue
 		}
+
 		if err != nil {
 			t.Errorf("parseTarget(%q) unexpected error: %v", tc.input, err)
 			continue
 		}
+
 		if owner != tc.owner || repo != tc.repo || tag != tc.tag {
 			t.Errorf("parseTarget(%q) = (%q, %q, %q), want (%q, %q, %q)",
 				tc.input, owner, repo, tag, tc.owner, tc.repo, tc.tag)
@@ -69,12 +72,15 @@ func TestSelectAsset(t *testing.T) {
 			if err == nil {
 				t.Errorf("selectAsset(%s/%s) expected error, got nil", tc.goos, tc.goarch)
 			}
+
 			continue
 		}
+
 		if err != nil {
 			t.Errorf("selectAsset(%s/%s) unexpected error: %v", tc.goos, tc.goarch, err)
 			continue
 		}
+
 		if a.Name != tc.want {
 			t.Errorf("selectAsset(%s/%s) = %q, want %q", tc.goos, tc.goarch, a.Name, tc.want)
 		}
@@ -135,6 +141,7 @@ func TestFetchRelease(t *testing.T) {
 	if len(got.Assets) != 1 || got.Assets[0].Name != want.Assets[0].Name {
 		t.Errorf("Assets = %v, want %v", got.Assets, want.Assets)
 	}
+
 	if gotPath != "/repos/owner/repo/releases/latest" {
 		t.Errorf("request path = %q, want %q", gotPath, "/repos/owner/repo/releases/latest")
 	}
@@ -177,9 +184,11 @@ func TestFetchReleaseNotFoundMessageForLatest(t *testing.T) {
 	if err == nil {
 		t.Fatal("fetchRelease expected error")
 	}
+
 	if !strings.Contains(err.Error(), "latest release not found for owner/repo") {
 		t.Fatalf("unexpected error message: %v", err)
 	}
+
 	if strings.Contains(err.Error(), "@") {
 		t.Fatalf("latest-release not found error should not include @: %v", err)
 	}
@@ -199,6 +208,7 @@ func TestFetchReleaseNotFoundMessageForTag(t *testing.T) {
 	if err == nil {
 		t.Fatal("fetchRelease expected error")
 	}
+
 	if !strings.Contains(err.Error(), "release not found for owner/repo@v1.2.3") {
 		t.Fatalf("unexpected error message: %v", err)
 	}
@@ -218,6 +228,7 @@ func TestFetchReleaseServerError(t *testing.T) {
 	if err == nil {
 		t.Fatal("fetchRelease expected non-nil error")
 	}
+
 	if !strings.Contains(err.Error(), "GitHub API returned 500") {
 		t.Fatalf("unexpected error message: %v", err)
 	}

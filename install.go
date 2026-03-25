@@ -25,6 +25,7 @@ func download(url string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
@@ -59,9 +60,11 @@ func installBinary(baseDir, owner, repo, tag, binName string, src *os.File) (_ s
 	} else if statErr != nil {
 		return "", statErr
 	}
+
 	if err := os.MkdirAll(installDir, 0755); err != nil {
 		return "", err
 	}
+
 	defer func() {
 		if err != nil && !installDirPreExisted {
 			os.RemoveAll(installDir)
@@ -73,6 +76,7 @@ func installBinary(baseDir, owner, repo, tag, binName string, src *os.File) (_ s
 	if err != nil {
 		return "", err
 	}
+
 	tmpName := tmp.Name()
 
 	if _, err := io.Copy(tmp, src); err != nil {
@@ -86,6 +90,7 @@ func installBinary(baseDir, owner, repo, tag, binName string, src *os.File) (_ s
 		os.Remove(tmpName)
 		return "", err
 	}
+
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpName)
 		return "", err
@@ -112,12 +117,14 @@ func installBinary(baseDir, owner, repo, tag, binName string, src *os.File) (_ s
 		if info.Mode()&os.ModeSymlink == 0 {
 			return "", fmt.Errorf("refusing to replace non-symlink %s", linkPath)
 		}
+
 		if err := os.Remove(linkPath); err != nil {
 			return "", err
 		}
 	} else if !os.IsNotExist(err) {
 		return "", err
 	}
+
 	if err := os.Symlink(binPath, linkPath); err != nil {
 		return "", err
 	}
@@ -162,6 +169,7 @@ func listInstalled(baseDir string) error {
 		if os.IsNotExist(err) {
 			return nil
 		}
+
 		return err
 	}
 
@@ -169,34 +177,41 @@ func listInstalled(baseDir string) error {
 		if !owner.IsDir() {
 			continue
 		}
+
 		ownerDir := filepath.Join(ghinstDir, owner.Name())
 		entries, err := os.ReadDir(ownerDir)
 		if err != nil {
 			return err
 		}
+
 		sort.Slice(entries, func(i, j int) bool {
 			ri, vi, _ := strings.Cut(entries[i].Name(), "@")
 			rj, vj, _ := strings.Cut(entries[j].Name(), "@")
 			if ri != rj {
 				return ri < rj
 			}
+
 			return vi > vj
 		})
 		for _, e := range entries {
 			if !e.IsDir() {
 				continue
 			}
+
 			repo, version, found := strings.Cut(e.Name(), "@")
 			if !found {
 				continue
 			}
+
 			marker := " "
 			if active[filepath.Join(ownerDir, e.Name())] {
 				marker = "*"
 			}
+
 			fmt.Printf("%s %s/%s %s\n", marker, owner.Name(), repo, version)
 		}
 	}
+
 	return nil
 }
 
@@ -209,6 +224,7 @@ func purge(baseDir, owner, repo string) error {
 		if os.IsNotExist(err) {
 			return nil
 		}
+
 		return err
 	}
 
@@ -217,6 +233,7 @@ func purge(baseDir, owner, repo string) error {
 		if !e.IsDir() {
 			continue
 		}
+
 		name, _, found := strings.Cut(e.Name(), "@")
 		if found && name == repo {
 			versions = append(versions, e)
@@ -236,6 +253,7 @@ func purge(baseDir, owner, repo string) error {
 			if err != nil {
 				continue
 			}
+
 			dir := filepath.Dir(target)
 			base := filepath.Base(dir)
 			if filepath.Dir(dir) == ownerDir && strings.HasPrefix(base, repo+"@") {
@@ -249,10 +267,12 @@ func purge(baseDir, owner, repo string) error {
 		if v.Name() == active {
 			continue
 		}
+
 		dir := filepath.Join(ownerDir, v.Name())
 		if err := os.RemoveAll(dir); err != nil {
 			return err
 		}
+
 		fmt.Printf("purged %s/%s\n", owner, v.Name())
 	}
 
