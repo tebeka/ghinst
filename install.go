@@ -11,7 +11,11 @@ import (
 	"time"
 )
 
-func download(url string) (*os.File, error) {
+func download(url string, expectedSize, maxBytes int64) (*os.File, error) {
+	if expectedSize > 0 && expectedSize > maxBytes {
+		return nil, fmt.Errorf("asset size %d bytes exceeds limit of %d bytes", expectedSize, maxBytes)
+	}
+
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -26,6 +30,10 @@ func download(url string) (*os.File, error) {
 
 	defer resp.Body.Close()
 
+	if resp.ContentLength > 0 && resp.ContentLength > maxBytes {
+		return nil, fmt.Errorf("download size %d bytes exceeds limit of %d bytes", resp.ContentLength, maxBytes)
+	}
+
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("download returned HTTP %d", resp.StatusCode)
 	}
@@ -35,10 +43,17 @@ func download(url string) (*os.File, error) {
 		return nil, err
 	}
 
-	if _, err := io.Copy(tmp, resp.Body); err != nil {
+	written, err := io.Copy(tmp, io.LimitReader(resp.Body, maxBytes+1))
+	if err != nil {
 		tmp.Close()
 		os.Remove(tmp.Name())
 		return nil, err
+	}
+
+	if written > maxBytes {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return nil, fmt.Errorf("download exceeded limit of %d bytes", maxBytes)
 	}
 
 	if _, err := tmp.Seek(0, io.SeekStart); err != nil {

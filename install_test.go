@@ -59,7 +59,7 @@ func TestDownload(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tmp, err := download(srv.URL)
+	tmp, err := download(srv.URL, int64(len(want)), 1<<20)
 	if err != nil {
 		t.Fatalf("download: unexpected error: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestDownloadAddsAuthorizationForAllowedGitHubHosts(t *testing.T) {
 		}, nil
 	}))
 
-	tmp, err := download("https://github.com/owner/repo/releases/download/v1.2.3/tool.tar.gz")
+	tmp, err := download("https://github.com/owner/repo/releases/download/v1.2.3/tool.tar.gz", 2, 1<<20)
 	if err != nil {
 		t.Fatalf("download: unexpected error: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestDownloadSkipsAuthorizationForUntrustedHosts(t *testing.T) {
 				}, nil
 			}))
 
-			tmp, err := download(rawURL)
+			tmp, err := download(rawURL, 2, 1<<20)
 			if err != nil {
 				t.Fatalf("download: unexpected error: %v", err)
 			}
@@ -143,7 +143,7 @@ func TestDownloadTimeout(t *testing.T) {
 			return nil, req.Context().Err()
 		}))
 
-		_, err := download("http://example.com/dl")
+		_, err := download("http://example.com/dl", 0, 1<<20)
 		if err == nil {
 			t.Fatal("download expected timeout error")
 		}
@@ -154,11 +154,43 @@ func TestDownloadTimeout(t *testing.T) {
 	})
 }
 
+func TestDownloadRejectsDeclaredAssetSizeOverLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be called when asset metadata already exceeds the limit")
+	}))
+	defer srv.Close()
+
+	_, err := download(srv.URL, 10, 5)
+	if err == nil {
+		t.Fatal("download expected error for oversized asset metadata")
+	}
+
+	if !strings.Contains(err.Error(), "exceeds limit") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDownloadRejectsResponseBodyOverLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("123456"))
+	}))
+	defer srv.Close()
+
+	_, err := download(srv.URL, 0, 5)
+	if err == nil {
+		t.Fatal("download expected error for oversized response body")
+	}
+
+	if !strings.Contains(err.Error(), "exceeds limit") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestInstallBinary(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	content := []byte("binary content")
-	src, err := writeTempFile(bytes.NewReader(content))
+	src, err := writeTempFile(bytes.NewReader(content), 1<<20)
 	if err != nil {
 		t.Fatalf("writeTempFile: %v", err)
 	}
@@ -195,7 +227,7 @@ func TestInstallBinaryEncodesSlashyTagsAndListDisplaysDecodedVersion(t *testing.
 	tmpDir := t.TempDir()
 	tag := "release/2026 build"
 
-	src, err := writeTempFile(bytes.NewReader([]byte("binary content")))
+	src, err := writeTempFile(bytes.NewReader([]byte("binary content")), 1<<20)
 	if err != nil {
 		t.Fatalf("writeTempFile: %v", err)
 	}
@@ -242,7 +274,7 @@ func TestInstallBinaryRejectsSymlinkedManagedRoot(t *testing.T) {
 		t.Fatalf("Symlink ghinst root: %v", err)
 	}
 
-	src, err := writeTempFile(bytes.NewReader([]byte("binary content")))
+	src, err := writeTempFile(bytes.NewReader([]byte("binary content")), 1<<20)
 	if err != nil {
 		t.Fatalf("writeTempFile: %v", err)
 	}
@@ -273,7 +305,7 @@ func TestInstallBinaryReplacesRunningBinaryLinux(t *testing.T) {
 	owner, repo, tag, binName := "owner", "repo", "v1.0.0", "tool"
 
 	initial := []byte("#!/bin/sh\nsleep 2\n")
-	src1, err := writeTempFile(bytes.NewReader(initial))
+	src1, err := writeTempFile(bytes.NewReader(initial), 1<<20)
 	if err != nil {
 		t.Fatalf("writeTempFile initial: %v", err)
 	}
@@ -301,7 +333,7 @@ func TestInstallBinaryReplacesRunningBinaryLinux(t *testing.T) {
 	}
 
 	replacement := []byte("#!/bin/sh\necho replaced\n")
-	src2, err := writeTempFile(bytes.NewReader(replacement))
+	src2, err := writeTempFile(bytes.NewReader(replacement), 1<<20)
 	if err != nil {
 		t.Fatalf("writeTempFile replacement: %v", err)
 	}
@@ -341,7 +373,7 @@ func TestInstallBinaryCleanupOnRenameFailure(t *testing.T) {
 		t.Fatalf("setup installDir: %v", err)
 	}
 
-	src, err := writeTempFile(bytes.NewReader([]byte("binary content")))
+	src, err := writeTempFile(bytes.NewReader([]byte("binary content")), 1<<20)
 	if err != nil {
 		t.Fatalf("writeTempFile: %v", err)
 	}
@@ -374,7 +406,7 @@ func TestInstallBinaryCleanupOnRenameFailure(t *testing.T) {
 func TestInstallBinaryRefusesReplacingRegularFileInBin(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	src, err := writeTempFile(bytes.NewReader([]byte("binary content")))
+	src, err := writeTempFile(bytes.NewReader([]byte("binary content")), 1<<20)
 	if err != nil {
 		t.Fatalf("writeTempFile: %v", err)
 	}
@@ -413,7 +445,7 @@ func TestInstallBinaryPreservesExistingSymlinkWhenReplacementSetupFails(t *testi
 
 	tmpDir := t.TempDir()
 
-	src, err := writeTempFile(bytes.NewReader([]byte("binary content")))
+	src, err := writeTempFile(bytes.NewReader([]byte("binary content")), 1<<20)
 	if err != nil {
 		t.Fatalf("writeTempFile: %v", err)
 	}

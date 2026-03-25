@@ -31,6 +31,29 @@ func TestMainListRequiresBaseDir(t *testing.T) {
 	}
 }
 
+func TestMainRejectsNonPositiveMaxSize(t *testing.T) {
+	cmd := exec.Command(os.Args[0], "-test.run=TestMainListRequiresBaseDirHelper", "--", "-list", "-max-size", "0")
+	cmd.Env = append(os.Environ(), "GHINST_TEST_MAIN=1")
+
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("expected non-zero exit status")
+	}
+
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("expected *exec.ExitError, got %T (%v)", err, err)
+	}
+
+	if exitErr.ExitCode() != 1 {
+		t.Fatalf("exit code = %d, want 1\noutput:\n%s", exitErr.ExitCode(), out)
+	}
+
+	if !strings.Contains(string(out), "-max-size must be greater than 0") {
+		t.Fatalf("expected max-size validation error, got output:\n%s", out)
+	}
+}
+
 func TestMainListRequiresBaseDirHelper(t *testing.T) {
 	if os.Getenv("GHINST_TEST_MAIN") != "1" {
 		return

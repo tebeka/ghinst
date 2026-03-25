@@ -17,7 +17,14 @@ var options struct {
 	force       bool
 	baseDir     string
 	completion  string
+	maxSizeMiB  int64
 }
+
+const (
+	defaultMaxAssetSizeMiB       int64 = 200
+	defaultMaxExtractedSizeBytes int64 = 100 << 20
+	mib                          int64 = 1 << 20
+)
 
 func buildVersion() string {
 	info, ok := debug.ReadBuildInfo()
@@ -42,6 +49,7 @@ func main() {
 	flag.BoolVar(&options.list, "list", false, "list installed apps")
 	flag.BoolVar(&options.force, "force", false, "install even if already on the latest version")
 	flag.StringVar(&options.baseDir, "dir", defaultBaseDir(), "base install directory (overrides GHINST_DIR)")
+	flag.Int64Var(&options.maxSizeMiB, "max-size", defaultMaxAssetSizeMiB, "maximum downloaded asset size in MiB")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: %s owner/repo[@version]\n", filepath.Base(os.Args[0]))
 		flag.PrintDefaults()
@@ -65,6 +73,11 @@ func main() {
 
 	if options.baseDir == "" {
 		fmt.Fprintln(os.Stderr, "error: could not determine install base dir; set -dir or GHINST_DIR")
+		os.Exit(1)
+	}
+
+	if options.maxSizeMiB <= 0 {
+		fmt.Fprintln(os.Stderr, "error: -max-size must be greater than 0")
 		os.Exit(1)
 	}
 
@@ -133,7 +146,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	tmp, err := download(asset.BrowserDownloadURL)
+	maxAssetSize := options.maxSizeMiB * mib
+	tmp, err := download(asset.BrowserDownloadURL, asset.Size, maxAssetSize)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: downloading: %v\n", err)
 		os.Exit(1)
@@ -142,7 +156,12 @@ func main() {
 	defer os.Remove(tmp.Name())
 	defer tmp.Close()
 
-	binName, binFile, err := extractBinary(tmp, asset.Name)
+	maxExtractedSize := defaultMaxExtractedSizeBytes
+	if maxAssetSize < maxExtractedSize {
+		maxExtractedSize = maxAssetSize
+	}
+
+	binName, binFile, err := extractBinary(tmp, asset.Name, maxExtractedSize)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: extracting: %v\n", err)
 		os.Exit(1)

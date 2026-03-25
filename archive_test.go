@@ -7,6 +7,7 @@ import (
 	"compress/gzip"
 	"io"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/ulikunitz/xz"
@@ -65,7 +66,7 @@ func TestFindInTar(t *testing.T) {
 		t.Fatalf("gzip.NewReader: %v", err)
 	}
 
-	name, tmp, err := findInTar(tar.NewReader(gr))
+	name, tmp, err := findInTar(tar.NewReader(gr), 1<<20)
 	if err != nil {
 		t.Fatalf("findInTar: unexpected error: %v", err)
 	}
@@ -97,7 +98,7 @@ func TestFindInTar(t *testing.T) {
 		t.Fatalf("gzip.NewReader no-exec: %v", err)
 	}
 
-	_, _, err = findInTar(tar.NewReader(gr2))
+	_, _, err = findInTar(tar.NewReader(gr2), 1<<20)
 	if err == nil {
 		t.Error("findInTar: expected error for archive with no executables")
 	}
@@ -182,7 +183,7 @@ func TestFindInZip(t *testing.T) {
 		t.Fatalf("buildZip exec: %v", err)
 	}
 
-	name, tmp, err := findInZip(bytes.NewReader(data), int64(len(data)))
+	name, tmp, err := findInZip(bytes.NewReader(data), int64(len(data)), 1<<20)
 	if err != nil {
 		t.Fatalf("findInZip exec: unexpected error: %v", err)
 	}
@@ -204,7 +205,7 @@ func TestFindInZip(t *testing.T) {
 		t.Fatalf("buildZip fallback noext: %v", err)
 	}
 
-	name2, tmp2, err := findInZip(bytes.NewReader(data2), int64(len(data2)))
+	name2, tmp2, err := findInZip(bytes.NewReader(data2), int64(len(data2)), 1<<20)
 	if err != nil {
 		t.Fatalf("findInZip fallback: unexpected error: %v", err)
 	}
@@ -226,7 +227,7 @@ func TestFindInZip(t *testing.T) {
 		t.Fatalf("buildZip no candidates: %v", err)
 	}
 
-	_, _, err = findInZip(bytes.NewReader(data3), int64(len(data3)))
+	_, _, err = findInZip(bytes.NewReader(data3), int64(len(data3)), 1<<20)
 	if err == nil {
 		t.Error("findInZip: expected error for archive with no candidates")
 	}
@@ -243,7 +244,7 @@ func TestFindInZip(t *testing.T) {
 		t.Fatalf("buildZip exe fallback: %v", err)
 	}
 
-	name4, tmp4, err := findInZip(bytes.NewReader(data4), int64(len(data4)))
+	name4, tmp4, err := findInZip(bytes.NewReader(data4), int64(len(data4)), 1<<20)
 	if err != nil {
 		t.Fatalf("findInZip exe fallback: unexpected error: %v", err)
 	}
@@ -266,7 +267,7 @@ func TestExtractBinaryTarXz(t *testing.T) {
 		t.Fatalf("buildTarXz: %v", err)
 	}
 
-	archive, err := writeTempFile(bytes.NewReader(data))
+	archive, err := writeTempFile(bytes.NewReader(data), 1<<20)
 	if err != nil {
 		t.Fatalf("writeTempFile: %v", err)
 	}
@@ -274,7 +275,7 @@ func TestExtractBinaryTarXz(t *testing.T) {
 	defer os.Remove(archive.Name())
 	defer archive.Close()
 
-	name, tmp, err := extractBinary(archive, "tool.tar.xz")
+	name, tmp, err := extractBinary(archive, "tool.tar.xz", 1<<20)
 	if err != nil {
 		t.Fatalf("extractBinary: unexpected error: %v", err)
 	}
@@ -293,5 +294,53 @@ func TestExtractBinaryTarXz(t *testing.T) {
 
 	if !bytes.Equal(got, content) {
 		t.Fatalf("extractBinary content mismatch: got %q, want %q", got, content)
+	}
+}
+
+func TestExtractBinaryRejectsOversizedRawBinary(t *testing.T) {
+	archive, err := writeTempFile(bytes.NewReader([]byte("123456")), 1<<20)
+	if err != nil {
+		t.Fatalf("writeTempFile: %v", err)
+	}
+
+	defer os.Remove(archive.Name())
+	defer archive.Close()
+
+	_, _, err = extractBinary(archive, "tool", 5)
+	if err == nil {
+		t.Fatal("extractBinary expected error for oversized raw binary")
+	}
+
+	if !strings.Contains(err.Error(), "exceeds limit") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestExtractBinaryRejectsOversizedArchiveMember(t *testing.T) {
+	content := []byte("123456")
+	data, err := buildTarGz([]struct {
+		name string
+		mode int64
+		body []byte
+	}{{"tool", 0755, content}})
+	if err != nil {
+		t.Fatalf("buildTarGz: %v", err)
+	}
+
+	archive, err := writeTempFile(bytes.NewReader(data), 1<<20)
+	if err != nil {
+		t.Fatalf("writeTempFile: %v", err)
+	}
+
+	defer os.Remove(archive.Name())
+	defer archive.Close()
+
+	_, _, err = extractBinary(archive, "tool.tar.gz", 5)
+	if err == nil {
+		t.Fatal("extractBinary expected error for oversized archive member")
+	}
+
+	if !strings.Contains(err.Error(), "exceeds limit") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
