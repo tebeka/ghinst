@@ -426,6 +426,81 @@ func TestPurgeOtherRepoLinkedFirst(t *testing.T) {
 	}
 }
 
+func TestPurgeReturnsErrorWhenBinDirMissingAndMultipleVersionsExist(t *testing.T) {
+	tmpDir := t.TempDir()
+	ownerDir := filepath.Join(tmpDir, "ghinst", "owner")
+
+	v1 := filepath.Join(ownerDir, "repo@v1.0.0")
+	v2 := filepath.Join(ownerDir, "repo@v2.0.0")
+	for _, d := range []string{v1, v2} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	err := purge(tmpDir, "owner", "repo")
+	if err == nil {
+		t.Fatal("purge expected error when active version cannot be determined")
+	}
+
+	if !strings.Contains(err.Error(), "could not determine active version for owner/repo") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if _, err := os.Stat(v1); err != nil {
+		t.Fatalf("v1.0.0 should remain after failed purge: %v", err)
+	}
+
+	if _, err := os.Stat(v2); err != nil {
+		t.Fatalf("v2.0.0 should remain after failed purge: %v", err)
+	}
+}
+
+func TestPurgeReturnsErrorWhenNoMatchingSymlinkExists(t *testing.T) {
+	tmpDir := t.TempDir()
+	ownerDir := filepath.Join(tmpDir, "ghinst", "owner")
+
+	v1 := filepath.Join(ownerDir, "repo@v1.0.0")
+	v2 := filepath.Join(ownerDir, "repo@v2.0.0")
+	other := filepath.Join(ownerDir, "other@v1.0.0")
+	for _, d := range []string{v1, v2, other} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	binDir := filepath.Join(tmpDir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	otherBin := filepath.Join(other, "other")
+	if err := os.WriteFile(otherBin, []byte("bin"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Symlink(otherBin, filepath.Join(binDir, "other")); err != nil {
+		t.Fatal(err)
+	}
+
+	err := purge(tmpDir, "owner", "repo")
+	if err == nil {
+		t.Fatal("purge expected error when no matching symlink exists")
+	}
+
+	if !strings.Contains(err.Error(), "could not determine active version for owner/repo") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if _, err := os.Stat(v1); err != nil {
+		t.Fatalf("v1.0.0 should remain after failed purge: %v", err)
+	}
+
+	if _, err := os.Stat(v2); err != nil {
+		t.Fatalf("v2.0.0 should remain after failed purge: %v", err)
+	}
+}
+
 func TestPurgeMissingOwnerDirIsNoOp(t *testing.T) {
 	tmpDir := t.TempDir()
 	if err := purge(tmpDir, "owner", "repo"); err != nil {

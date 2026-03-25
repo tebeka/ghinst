@@ -263,6 +263,10 @@ func purge(baseDir, owner, repo string) error {
 		}
 	}
 
+	if active == "" {
+		return fmt.Errorf("could not determine active version for %s/%s", owner, repo)
+	}
+
 	for _, v := range versions {
 		if v.Name() == active {
 			continue
