@@ -7,6 +7,9 @@ _ghinst() {
             _filedir -d
             return
             ;;
+        -max-size)
+            return
+            ;;
         -completion)
             COMPREPLY=($(compgen -W "bash zsh fish" -- "$cur"))
             return
@@ -14,7 +17,7 @@ _ghinst() {
     esac
 
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "-version -purge -list -force -dir -completion" -- "$cur"))
+        COMPREPLY=($(compgen -W "-completion -version -purge -list -force -dir -max-size" -- "$cur"))
         return
     fi
 }

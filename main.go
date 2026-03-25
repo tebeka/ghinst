@@ -42,19 +42,22 @@ func buildVersion() string {
 	return v
 }
 
-func main() {
-	flag.StringVar(&options.completion, "completion", "", "print shell completion script (bash, zsh, fish)")
-	flag.BoolVar(&options.showVersion, "version", false, "print version and exit")
-	flag.BoolVar(&options.doPurge, "purge", false, "remove all but the currently used version of owner/repo")
-	flag.BoolVar(&options.list, "list", false, "list installed apps")
-	flag.BoolVar(&options.force, "force", false, "install even if already on the latest version")
-	flag.StringVar(&options.baseDir, "dir", defaultBaseDir(), "base install directory (overrides GHINST_DIR)")
-	flag.Int64Var(&options.maxSizeMiB, "max-size", defaultMaxAssetSizeMiB, "maximum downloaded asset size in MiB")
-	flag.Usage = func() {
+func registerFlags(fs *flag.FlagSet) {
+	fs.StringVar(&options.completion, "completion", "", "print shell completion script (bash, zsh, fish)")
+	fs.BoolVar(&options.showVersion, "version", false, "print version and exit")
+	fs.BoolVar(&options.doPurge, "purge", false, "remove all but the currently used version of owner/repo")
+	fs.BoolVar(&options.list, "list", false, "list installed apps")
+	fs.BoolVar(&options.force, "force", false, "install even if already on the latest version")
+	fs.StringVar(&options.baseDir, "dir", defaultBaseDir(), "base install directory (overrides GHINST_DIR)")
+	fs.Int64Var(&options.maxSizeMiB, "max-size", defaultMaxAssetSizeMiB, "maximum downloaded asset size in MiB")
+	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: %s owner/repo[@version]\n", filepath.Base(os.Args[0]))
-		flag.PrintDefaults()
+		fs.PrintDefaults()
 	}
+}
 
+func main() {
+	registerFlags(flag.CommandLine)
 	flag.Parse()
 
 	if options.completion != "" {
