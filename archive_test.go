@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"testing"
+
+	"github.com/ulikunitz/xz"
 )
 
 func buildTarGz(files []struct {
@@ -129,6 +131,46 @@ func buildZip(files []struct {
 	return buf.Bytes(), nil
 }
 
+func buildTarXz(files []struct {
+	name string
+	mode int64
+	body []byte
+}) ([]byte, error) {
+	buf := &bytes.Buffer{}
+	xzw, err := xz.NewWriter(buf)
+	if err != nil {
+		return nil, err
+	}
+
+	tw := tar.NewWriter(xzw)
+	for _, f := range files {
+		hdr := &tar.Header{
+			Name:     f.name,
+			Typeflag: tar.TypeReg,
+			Mode:     f.mode,
+			Size:     int64(len(f.body)),
+		}
+
+		if err := tw.WriteHeader(hdr); err != nil {
+			return nil, err
+		}
+
+		if _, err := tw.Write(f.body); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := tw.Close(); err != nil {
+		return nil, err
+	}
+
+	if err := xzw.Close(); err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
+
 func TestFindInZip(t *testing.T) {
 	// Exec bit set → returned.
 	data, err := buildZip([]struct {
@@ -210,5 +252,46 @@ func TestFindInZip(t *testing.T) {
 	defer tmp4.Close()
 	if name4 != "tool.exe" {
 		t.Fatalf("findInZip exe fallback name = %q, want %q", name4, "tool.exe")
+	}
+}
+
+func TestExtractBinaryTarXz(t *testing.T) {
+	content := []byte("#!/bin/sh\necho xz")
+	data, err := buildTarXz([]struct {
+		name string
+		mode int64
+		body []byte
+	}{{"tool", 0755, content}})
+	if err != nil {
+		t.Fatalf("buildTarXz: %v", err)
+	}
+
+	archive, err := writeTempFile(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("writeTempFile: %v", err)
+	}
+
+	defer os.Remove(archive.Name())
+	defer archive.Close()
+
+	name, tmp, err := extractBinary(archive, "tool.tar.xz")
+	if err != nil {
+		t.Fatalf("extractBinary: unexpected error: %v", err)
+	}
+
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+
+	if name != "tool" {
+		t.Fatalf("extractBinary name = %q, want %q", name, "tool")
+	}
+
+	got, err := io.ReadAll(tmp)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+
+	if !bytes.Equal(got, content) {
+		t.Fatalf("extractBinary content mismatch: got %q, want %q", got, content)
 	}
 }

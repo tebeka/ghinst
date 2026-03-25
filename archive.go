@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/ulikunitz/xz"
 )
 
 // extractBinary extracts the binary from an archive into a temp file.
@@ -28,6 +30,14 @@ func extractBinary(f *os.File, assetName string) (string, *os.File, error) {
 
 	case strings.HasSuffix(lower, ".tar.bz2"):
 		return findInTar(tar.NewReader(bzip2.NewReader(f)))
+
+	case strings.HasSuffix(lower, ".tar.xz"):
+		xzr, err := xz.NewReader(f)
+		if err != nil {
+			return "", nil, err
+		}
+
+		return findInTar(tar.NewReader(xzr))
 
 	case strings.HasSuffix(lower, ".zip"):
 		info, err := f.Stat()

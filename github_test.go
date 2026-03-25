@@ -95,6 +95,7 @@ func TestIsArchive(t *testing.T) {
 		{"tool.tar.gz", true},
 		{"tool.tgz", true},
 		{"tool.tar.bz2", true},
+		{"tool.tar.xz", true},
 		{"tool.zip", true},
 		{"tool.deb", false},
 		{"tool.rpm", false},
