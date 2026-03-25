@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -187,6 +188,64 @@ func TestFetchReleaseEscapesTagPathComponent(t *testing.T) {
 	wantPath := "/repos/owner/repo/releases/tags/" + url.PathEscape(tag)
 	if gotPath != wantPath {
 		t.Fatalf("request path = %q, want %q", gotPath, wantPath)
+	}
+}
+
+func TestFetchReleaseAddsAuthorizationForGitHubAPI(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "secret-token")
+	old := apiBase
+	apiBase = "https://api.github.com"
+	defer func() { apiBase = old }()
+
+	setTestHTTPTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if got := req.Header.Get("Authorization"); got != "Bearer secret-token" {
+			t.Fatalf("Authorization = %q, want %q", got, "Bearer secret-token")
+		}
+
+		body, err := json.Marshal(Release{TagName: "v1.2.3"})
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(string(body))),
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	}))
+
+	if _, err := fetchRelease("owner", "repo", ""); err != nil {
+		t.Fatalf("fetchRelease: unexpected error: %v", err)
+	}
+}
+
+func TestFetchReleaseSkipsAuthorizationForNonGitHubAPIBase(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "secret-token")
+	old := apiBase
+	apiBase = "https://example.com"
+	defer func() { apiBase = old }()
+
+	setTestHTTPTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if got := req.Header.Get("Authorization"); got != "" {
+			t.Fatalf("Authorization = %q, want empty", got)
+		}
+
+		body, err := json.Marshal(Release{TagName: "v1.2.3"})
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(string(body))),
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	}))
+
+	if _, err := fetchRelease("owner", "repo", ""); err != nil {
+		t.Fatalf("fetchRelease: unexpected error: %v", err)
 	}
 }
 

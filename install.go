@@ -17,9 +17,7 @@ func download(url string) (*os.File, error) {
 		return nil, err
 	}
 
-	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
+	attachGitHubToken(req, authScopeDownload)
 
 	resp, err := httpClient.Do(req)
 	if err != nil {

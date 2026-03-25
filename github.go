@@ -39,6 +39,47 @@ var archiveExts = []string{".tar.gz", ".tgz", ".tar.bz2", ".tar.xz", ".zip"}
 var apiBase = "https://api.github.com"
 var httpClient = &http.Client{Timeout: 30 * time.Second}
 
+type authScope int
+
+const (
+	authScopeAPI authScope = iota
+	authScopeDownload
+)
+
+var downloadAuthHosts = map[string]struct{}{
+	"api.github.com":                        {},
+	"github.com":                            {},
+	"objects.githubusercontent.com":         {},
+	"release-assets.githubusercontent.com":  {},
+	"github-releases.githubusercontent.com": {},
+}
+
+func attachGitHubToken(req *http.Request, scope authScope) {
+	token := os.Getenv("GITHUB_TOKEN")
+	if token == "" || !allowsGitHubToken(req.URL, scope) {
+		return
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+}
+
+func allowsGitHubToken(u *url.URL, scope authScope) bool {
+	if u == nil || !strings.EqualFold(u.Scheme, "https") {
+		return false
+	}
+
+	host := strings.ToLower(u.Hostname())
+	switch scope {
+	case authScopeAPI:
+		return host == "api.github.com"
+	case authScopeDownload:
+		_, ok := downloadAuthHosts[host]
+		return ok
+	default:
+		return false
+	}
+}
+
 func fetchRelease(owner, repo, tag string) (Release, error) {
 	ownerPath := url.PathEscape(owner)
 	repoPath := url.PathEscape(repo)
@@ -54,9 +95,7 @@ func fetchRelease(owner, repo, tag string) (Release, error) {
 
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
+	attachGitHubToken(req, authScopeAPI)
 
 	resp, err := httpClient.Do(req)
 	if err != nil {

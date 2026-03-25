@@ -77,6 +77,65 @@ func TestDownload(t *testing.T) {
 	}
 }
 
+func TestDownloadAddsAuthorizationForAllowedGitHubHosts(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "secret-token")
+
+	setTestHTTPTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if got := req.Header.Get("Authorization"); got != "Bearer secret-token" {
+			t.Fatalf("Authorization = %q, want %q", got, "Bearer secret-token")
+		}
+
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("ok")),
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	}))
+
+	tmp, err := download("https://github.com/owner/repo/releases/download/v1.2.3/tool.tar.gz")
+	if err != nil {
+		t.Fatalf("download: unexpected error: %v", err)
+	}
+
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+}
+
+func TestDownloadSkipsAuthorizationForUntrustedHosts(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "secret-token")
+
+	tests := []string{
+		"https://example.com/tool.tar.gz",
+		"http://github.com/owner/repo/releases/download/v1.2.3/tool.tar.gz",
+	}
+
+	for _, rawURL := range tests {
+		t.Run(rawURL, func(t *testing.T) {
+			setTestHTTPTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				if got := req.Header.Get("Authorization"); got != "" {
+					t.Fatalf("Authorization = %q, want empty", got)
+				}
+
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader("ok")),
+					Header:     make(http.Header),
+					Request:    req,
+				}, nil
+			}))
+
+			tmp, err := download(rawURL)
+			if err != nil {
+				t.Fatalf("download: unexpected error: %v", err)
+			}
+
+			defer os.Remove(tmp.Name())
+			defer tmp.Close()
+		})
+	}
+}
+
 func TestDownloadTimeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		setTestHTTPTransport(t, roundTripFunc(func(req *http.Request) (*http.Response, error) {
