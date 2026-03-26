@@ -164,10 +164,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	maxExtractedSize := defaultMaxExtractedSizeBytes
-	if maxAssetSize < maxExtractedSize {
-		maxExtractedSize = maxAssetSize
-	}
+	maxExtractedSize := min(defaultMaxExtractedSizeBytes, maxAssetSize)
 
 	binName, binFile, err := extractBinary(tmp, asset.Name, maxExtractedSize)
 	if err != nil {

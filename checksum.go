@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -39,7 +40,7 @@ func verifyAssetDigest(asset Asset, f *os.File, warnings io.Writer) error {
 	}
 
 	got := h.Sum(nil)
-	if !equalBytes(got, want) {
+	if !bytes.Equal(got, want) {
 		return fmt.Errorf("checksum mismatch for %s", asset.Name)
 	}
 
@@ -58,18 +59,4 @@ func hashFile(f *os.File, h hash.Hash) error {
 
 	_, err := f.Seek(0, io.SeekStart)
 	return err
-}
-
-func equalBytes(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-
-	return true
 }
