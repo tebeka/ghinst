@@ -78,8 +78,8 @@ func parseBashCompletionFlags(script []byte) []string {
 	matches := re.FindAllSubmatch(script, -1)
 	flags := make([]string, 0)
 	for _, match := range matches {
-		fields := bytes.Fields(match[1])
-		for _, field := range fields {
+		fields := bytes.FieldsSeq(match[1])
+		for field := range fields {
 			if len(field) > 0 && field[0] == '-' {
 				flags = append(flags, string(field))
 			}
