@@ -16,14 +16,7 @@ func download(url string, expectedSize, maxBytes int64) (*os.File, error) {
 		return nil, fmt.Errorf("asset size %d bytes exceeds limit of %d bytes", expectedSize, maxBytes)
 	}
 
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	attachGitHubToken(req, authScopeDownload)
-
-	resp, err := httpClient.Do(req)
+	resp, err := getGitHub(http.MethodGet, url, authScopeDownload)
 	if err != nil {
 		return nil, err
 	}
@@ -34,35 +27,11 @@ func download(url string, expectedSize, maxBytes int64) (*os.File, error) {
 		return nil, fmt.Errorf("download size %d bytes exceeds limit of %d bytes", resp.ContentLength, maxBytes)
 	}
 
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("download returned HTTP %d", resp.StatusCode)
 	}
 
-	tmp, err := os.CreateTemp("", "ghinst-*")
-	if err != nil {
-		return nil, err
-	}
-
-	written, err := io.Copy(tmp, io.LimitReader(resp.Body, maxBytes+1))
-	if err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
-		return nil, err
-	}
-
-	if written > maxBytes {
-		tmp.Close()
-		os.Remove(tmp.Name())
-		return nil, fmt.Errorf("download exceeded limit of %d bytes", maxBytes)
-	}
-
-	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
-		return nil, err
-	}
-
-	return tmp, nil
+	return copyToTempFile("", "ghinst-*", resp.Body, maxBytes)
 }
 
 // installBinary places the binary under <baseDir>/ghinst/owner/repo@tag/
@@ -95,18 +64,12 @@ func installBinary(baseDir, owner, repo, tag, binName string, src *os.File) (_ s
 	}()
 
 	binPath := filepath.Join(installDir, binName)
-	tmp, err := os.CreateTemp(installDir, ".tmp-*")
+	tmp, err := copyToTempFile(installDir, ".tmp-*", src, 0)
 	if err != nil {
 		return "", err
 	}
 
 	tmpName := tmp.Name()
-
-	if _, err := io.Copy(tmp, src); err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
-		return "", err
-	}
 
 	if err := tmp.Chmod(0755); err != nil {
 		tmp.Close()
@@ -190,25 +153,9 @@ func defaultBaseDir() string {
 }
 
 func listInstalled(baseDir string) error {
-	active := map[string]bool{}
-	binDir := managedBinDir(baseDir)
-	if err := ensurePathNotSymlink(binDir); err != nil {
-		return err
-	}
-
-	links, err := os.ReadDir(binDir)
+	active, err := activeInstallDirs(baseDir)
 	if err != nil {
-		if !os.IsNotExist(err) {
-			return err
-		}
-	} else {
-		for _, l := range links {
-			linkPath := filepath.Join(binDir, l.Name())
-			target, err := os.Readlink(linkPath)
-			if err == nil {
-				active[filepath.Dir(target)] = true
-			}
-		}
+		return err
 	}
 
 	ghinstDir := managedGhinstRoot(baseDir)
@@ -216,13 +163,13 @@ func listInstalled(baseDir string) error {
 		return err
 	}
 
-	owners, err := os.ReadDir(ghinstDir)
+	owners, err := readDirIfExists(ghinstDir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-
 		return err
+	}
+
+	if owners == nil {
+		return nil
 	}
 
 	for _, owner := range owners {
@@ -262,8 +209,8 @@ func listInstalled(baseDir string) error {
 				continue
 			}
 
-			repo, version, found := strings.Cut(e.Name(), "@")
-			if !found {
+			repo, encodedTag, ok := installDirParts(e.Name())
+			if !ok {
 				continue
 			}
 
@@ -272,7 +219,7 @@ func listInstalled(baseDir string) error {
 				marker = "*"
 			}
 
-			fmt.Printf("%s %s/%s %s\n", marker, owner.Name(), repo, decodeTagFromPathComponent(version))
+			fmt.Printf("%s %s/%s %s\n", marker, owner.Name(), repo, decodeTagFromPathComponent(encodedTag))
 		}
 	}
 
@@ -294,64 +241,43 @@ func purge(baseDir, owner, repo string) error {
 		return err
 	}
 
-	entries, err := os.ReadDir(ownerDir)
+	entries, err := readDirIfExists(ownerDir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-
 		return err
 	}
 
-	var versions []os.DirEntry
-	for _, e := range entries {
-		if e.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("refusing to use symlinked path %s", filepath.Join(ownerDir, e.Name()))
-		}
+	if entries == nil {
+		return nil
+	}
 
-		if !e.IsDir() {
-			continue
-		}
-
-		name, _, found := strings.Cut(e.Name(), "@")
-		if found && name == repo {
-			versions = append(versions, e)
-		}
+	versions, err := repoVersions(ownerDir, repo, entries)
+	if err != nil {
+		return err
 	}
 
 	if len(versions) <= 1 {
 		return nil
 	}
 
-	// Find the currently linked version by resolving symlinks in <baseDir>/bin/.
-	active := ""
-	binDir := managedBinDir(baseDir)
-	if err := ensurePathNotSymlink(binDir); err != nil && !os.IsNotExist(err) {
+	active, err := activeInstallDirs(baseDir)
+	if err != nil {
 		return err
 	}
 
-	if links, err := os.ReadDir(binDir); err == nil {
-		for _, l := range links {
-			target, err := os.Readlink(filepath.Join(binDir, l.Name()))
-			if err != nil {
-				continue
-			}
-
-			dir := filepath.Dir(target)
-			base := filepath.Base(dir)
-			if filepath.Dir(dir) == ownerDir && strings.HasPrefix(base, repo+"@") {
-				active = base
-				break
-			}
+	activeVersion := ""
+	for _, v := range versions {
+		if active[filepath.Join(ownerDir, v.Name())] {
+			activeVersion = v.Name()
+			break
 		}
 	}
 
-	if active == "" {
+	if activeVersion == "" {
 		return fmt.Errorf("could not determine active version for %s/%s", owner, repo)
 	}
 
 	for _, v := range versions {
-		if v.Name() == active {
+		if v.Name() == activeVersion {
 			continue
 		}
 
@@ -372,4 +298,95 @@ func purge(baseDir, owner, repo string) error {
 	}
 
 	return nil
+}
+
+func copyToTempFile(dir, pattern string, r io.Reader, maxBytes int64) (*os.File, error) {
+	tmp, err := os.CreateTemp(dir, pattern)
+	if err != nil {
+		return nil, err
+	}
+
+	var written int64
+	if maxBytes > 0 {
+		written, err = io.Copy(tmp, io.LimitReader(r, maxBytes+1))
+		if err == nil && written > maxBytes {
+			err = fmt.Errorf("size exceeds limit of %d bytes", maxBytes)
+		}
+	} else {
+		_, err = io.Copy(tmp, r)
+	}
+
+	if err != nil {
+		os.Remove(tmp.Name())
+		tmp.Close()
+		return nil, err
+	}
+
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		os.Remove(tmp.Name())
+		tmp.Close()
+		return nil, err
+	}
+
+	return tmp, nil
+}
+
+func readDirIfExists(path string) ([]os.DirEntry, error) {
+	entries, err := os.ReadDir(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+
+	return entries, err
+}
+
+func activeInstallDirs(baseDir string) (map[string]bool, error) {
+	active := map[string]bool{}
+	binDir := managedBinDir(baseDir)
+	if err := ensurePathNotSymlink(binDir); err != nil {
+		return nil, err
+	}
+
+	links, err := readDirIfExists(binDir)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, l := range links {
+		target, err := os.Readlink(filepath.Join(binDir, l.Name()))
+		if err == nil {
+			active[filepath.Dir(target)] = true
+		}
+	}
+
+	return active, nil
+}
+
+func repoVersions(ownerDir, repo string, entries []os.DirEntry) ([]os.DirEntry, error) {
+	var versions []os.DirEntry
+	for _, e := range entries {
+		if e.Type()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("refusing to use symlinked path %s", filepath.Join(ownerDir, e.Name()))
+		}
+
+		if !e.IsDir() {
+			continue
+		}
+
+		name, _, ok := installDirParts(e.Name())
+		if ok && name == repo {
+			versions = append(versions, e)
+		}
+	}
+
+	return versions, nil
+}
+
+func installDirParts(name string) (repo, encodedTag string, ok bool) {
+	repo, encodedTag, ok = strings.Cut(name, "@")
+	if !ok || repo == "" || encodedTag == "" {
+		return "", "", false
+	}
+
+	return repo, encodedTag, true
 }

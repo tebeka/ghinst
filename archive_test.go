@@ -344,3 +344,32 @@ func TestExtractBinaryRejectsOversizedArchiveMember(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestPickZipBinary(t *testing.T) {
+	data, err := buildZip([]struct {
+		name string
+		mode os.FileMode
+		body []byte
+	}{
+		{"README", 0644, []byte("readme")},
+		{"tool.exe", 0644, []byte("exe")},
+		{"tool", 0755, []byte("exec")},
+	})
+	if err != nil {
+		t.Fatalf("buildZip: %v", err)
+	}
+
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatalf("zip.NewReader: %v", err)
+	}
+
+	best := pickZipBinary(zr.File)
+	if best == nil {
+		t.Fatal("pickZipBinary returned nil")
+	}
+
+	if best.Name != "tool" {
+		t.Fatalf("pickZipBinary name = %q, want %q", best.Name, "tool")
+	}
+}

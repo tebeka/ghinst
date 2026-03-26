@@ -781,3 +781,62 @@ func TestPurgeRejectsSymlinkedOwnerDir(t *testing.T) {
 		}
 	}
 }
+
+func TestCopyToTempFileRejectsOversizedContent(t *testing.T) {
+	tmp, err := copyToTempFile("", "ghinst-test-*", strings.NewReader("123456"), 5)
+	if err == nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		t.Fatal("copyToTempFile expected size limit error")
+	}
+
+	if !strings.Contains(err.Error(), "exceeds limit") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestInstallDirParts(t *testing.T) {
+	repo, encodedTag, ok := installDirParts("repo@" + encodeTagForPath("release/2026 build"))
+	if !ok {
+		t.Fatal("installDirParts should parse managed install dir names")
+	}
+
+	if repo != "repo" {
+		t.Fatalf("repo = %q, want %q", repo, "repo")
+	}
+
+	if decodeTagFromPathComponent(encodedTag) != "release/2026 build" {
+		t.Fatalf("decoded tag = %q, want %q", decodeTagFromPathComponent(encodedTag), "release/2026 build")
+	}
+}
+
+func TestActiveInstallDirs(t *testing.T) {
+	tmpDir := t.TempDir()
+	installDir := filepath.Join(tmpDir, "ghinst", "owner", "repo@"+encodeTagForPath("v1.0.0"))
+	if err := os.MkdirAll(installDir, 0755); err != nil {
+		t.Fatalf("MkdirAll install dir: %v", err)
+	}
+
+	binDir := filepath.Join(tmpDir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("MkdirAll bin dir: %v", err)
+	}
+
+	binPath := filepath.Join(installDir, "tool")
+	if err := os.WriteFile(binPath, []byte("bin"), 0755); err != nil {
+		t.Fatalf("WriteFile binary: %v", err)
+	}
+
+	if err := os.Symlink(binPath, filepath.Join(binDir, "tool")); err != nil {
+		t.Fatalf("Symlink tool: %v", err)
+	}
+
+	active, err := activeInstallDirs(tmpDir)
+	if err != nil {
+		t.Fatalf("activeInstallDirs: %v", err)
+	}
+
+	if !active[installDir] {
+		t.Fatalf("activeInstallDirs missing %q", installDir)
+	}
+}

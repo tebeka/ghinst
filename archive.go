@@ -48,9 +48,7 @@ func extractBinary(f *os.File, assetName string, maxBytes int64) (string, *os.Fi
 		return findInZip(f, info.Size(), maxBytes)
 	}
 
-	if info, err := f.Stat(); err == nil && info.Size() > maxBytes {
-		return "", nil, fmt.Errorf("binary size %d bytes exceeds limit of %d bytes", info.Size(), maxBytes)
-	} else if err != nil {
+	if err := validateFileSize(f, maxBytes); err != nil {
 		return "", nil, err
 	}
 
@@ -96,42 +94,7 @@ func findInZip(r io.ReaderAt, size int64, maxBytes int64) (string, *os.File, err
 		return "", nil, err
 	}
 
-	var execMatch *zip.File
-	var exeFallback *zip.File
-	var noExtFallback *zip.File
-	for _, f := range zr.File {
-		if f.FileInfo().IsDir() {
-			continue
-		}
-
-		base := filepath.Base(f.Name)
-		isExec := f.Mode()&0111 != 0
-		ext := strings.ToLower(filepath.Ext(base))
-
-		if isExec {
-			execMatch = f
-			break
-		}
-
-		if ext == ".exe" && exeFallback == nil {
-			exeFallback = f
-			continue
-		}
-
-		if ext == "" && noExtFallback == nil {
-			noExtFallback = f
-		}
-	}
-
-	best := execMatch
-	if best == nil {
-		best = exeFallback
-	}
-
-	if best == nil {
-		best = noExtFallback
-	}
-
+	best := pickZipBinary(zr.File)
 	if best == nil {
 		return "", nil, fmt.Errorf("no executable found in archive")
 	}
@@ -156,29 +119,49 @@ func findInZip(r io.ReaderAt, size int64, maxBytes int64) (string, *os.File, err
 }
 
 func writeTempFile(r io.Reader, maxBytes int64) (*os.File, error) {
-	tmp, err := os.CreateTemp("", "ghinst-bin-*")
+	return copyToTempFile("", "ghinst-bin-*", r, maxBytes)
+}
+
+func validateFileSize(f *os.File, maxBytes int64) error {
+	info, err := f.Stat()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	written, err := io.Copy(tmp, io.LimitReader(r, maxBytes+1))
-	if err != nil {
-		os.Remove(tmp.Name())
-		tmp.Close()
-		return nil, err
+	if info.Size() > maxBytes {
+		return fmt.Errorf("binary size %d bytes exceeds limit of %d bytes", info.Size(), maxBytes)
 	}
 
-	if written > maxBytes {
-		os.Remove(tmp.Name())
-		tmp.Close()
-		return nil, fmt.Errorf("binary size exceeds limit of %d bytes", maxBytes)
+	return nil
+}
+
+func pickZipBinary(files []*zip.File) *zip.File {
+	var exeFallback *zip.File
+	var noExtFallback *zip.File
+	for _, f := range files {
+		if f.FileInfo().IsDir() {
+			continue
+		}
+
+		base := filepath.Base(f.Name)
+		if f.Mode()&0111 != 0 {
+			return f
+		}
+
+		ext := strings.ToLower(filepath.Ext(base))
+		if ext == ".exe" && exeFallback == nil {
+			exeFallback = f
+			continue
+		}
+
+		if ext == "" && noExtFallback == nil {
+			noExtFallback = f
+		}
 	}
 
-	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-		os.Remove(tmp.Name())
-		tmp.Close()
-		return nil, err
+	if exeFallback != nil {
+		return exeFallback
 	}
 
-	return tmp, nil
+	return noExtFallback
 }

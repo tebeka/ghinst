@@ -12,7 +12,7 @@ import (
 
 var options struct {
 	showVersion bool
-	doPurge     bool
+	purge       bool
 	list        bool
 	force       bool
 	baseDir     string
@@ -45,7 +45,7 @@ func buildVersion() string {
 func registerFlags(fs *flag.FlagSet) {
 	fs.StringVar(&options.completion, "completion", "", "print shell completion script (bash, zsh, fish)")
 	fs.BoolVar(&options.showVersion, "version", false, "print version and exit")
-	fs.BoolVar(&options.doPurge, "purge", false, "remove all but the currently used version of owner/repo")
+	fs.BoolVar(&options.purge, "purge", false, "remove all but the currently used version of owner/repo")
 	fs.BoolVar(&options.list, "list", false, "list installed apps")
 	fs.BoolVar(&options.force, "force", false, "install even if already on the latest version")
 	fs.StringVar(&options.baseDir, "dir", defaultBaseDir(), "base install directory (overrides GHINST_DIR)")
@@ -74,13 +74,8 @@ func main() {
 		return
 	}
 
-	if options.baseDir == "" {
-		fmt.Fprintln(os.Stderr, "error: could not determine install base dir; set -dir or GHINST_DIR")
-		os.Exit(1)
-	}
-
-	if options.maxSizeMiB <= 0 {
-		fmt.Fprintln(os.Stderr, "error: -max-size must be greater than 0")
+	if err := validateOptions(); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -94,94 +89,142 @@ func main() {
 	}
 
 	if flag.NArg() != 1 {
-		flag.Usage()
+		fmt.Fprintln(os.Stderr, "error: wrong number of arguments")
 		os.Exit(1)
 	}
 
-	owner, repo, tag, err := parseTarget(flag.Arg(0))
+	pkg := flag.Arg(0)
+
+	owner, repo, tag, err := parseTarget(pkg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 
-	if options.doPurge {
-		if err := purge(options.baseDir, owner, repo); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-
-		return
+	if options.purge {
+		err = purge(options.baseDir, owner, repo)
+	} else {
+		err = handleInstall(owner, repo, tag)
 	}
 
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func validateOptions() error {
+	if options.baseDir == "" {
+		return fmt.Errorf("could not determine install base dir; set -dir or GHINST_DIR")
+	}
+
+	if options.maxSizeMiB <= 0 {
+		return fmt.Errorf("-max-size must be greater than 0")
+	}
+
+	return nil
+}
+
+func handleInstall(owner, repo, tag string) error {
 	release, err := fetchRelease(owner, repo, tag)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
-	installDir, _, err := managedInstallDir(options.baseDir, owner, repo, release.TagName)
+	installNeeded, err := ensureInstallNeeded(owner, repo, release.TagName)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: resolving install directory: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
-	if !options.force {
-		healthy, err := isHealthyInstallDir(installDir)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: checking existing install: %v\n", err)
-			os.Exit(1)
-		}
-
-		if healthy {
-			fmt.Printf("%s/%s is already at %s\n", owner, repo, release.TagName)
-			return
-		}
+	if !installNeeded {
+		return nil
 	}
 
 	asset, err := selectAsset(release.Assets, runtime.GOOS, runtime.GOARCH)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		fmt.Fprintln(os.Stderr, "available assets:")
-		for _, a := range release.Assets {
-			fmt.Fprintf(os.Stderr, "  %s\n", a.Name)
-		}
-
-		os.Exit(1)
+		printAvailableAssets(release.Assets)
+		return err
 	}
 
-	maxAssetSize := options.maxSizeMiB * mib
-	tmp, err := download(asset.BrowserDownloadURL, asset.Size, maxAssetSize)
+	linkPath, err := installReleaseAsset(owner, repo, release.TagName, asset)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: downloading: %v\n", err)
-		os.Exit(1)
+		return err
+	}
+
+	fmt.Printf("installed %s (%s) → %s\n", repo, release.TagName, linkPath)
+	return nil
+}
+
+func ensureInstallNeeded(owner, repo, tag string) (bool, error) {
+	if options.force {
+		return true, nil
+	}
+
+	installDir, _, err := managedInstallDir(options.baseDir, owner, repo, tag)
+	if err != nil {
+		return false, fmt.Errorf("resolving install directory: %w", err)
+	}
+
+	healthy, err := isHealthyInstallDir(installDir)
+	if err != nil {
+		return false, fmt.Errorf("checking existing install: %w", err)
+	}
+
+	if healthy {
+		fmt.Printf("%s/%s is already at %s\n", owner, repo, tag)
+		return false, nil
+	}
+
+	return true, nil
+}
+
+func installReleaseAsset(owner, repo, tag string, asset Asset) (string, error) {
+	maxAssetSize := options.maxSizeMiB * mib
+	tmp, err := downloadAndVerify(asset, maxAssetSize)
+	if err != nil {
+		return "", err
 	}
 
 	defer os.Remove(tmp.Name())
 	defer tmp.Close()
 
-	if err := verifyAssetDigest(asset, tmp, os.Stderr); err != nil {
-		fmt.Fprintf(os.Stderr, "error: verifying checksum: %v\n", err)
-		os.Exit(1)
-	}
-
 	maxExtractedSize := min(defaultMaxExtractedSizeBytes, maxAssetSize)
-
 	binName, binFile, err := extractBinary(tmp, asset.Name, maxExtractedSize)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: extracting: %v\n", err)
-		os.Exit(1)
+		return "", fmt.Errorf("extracting: %w", err)
 	}
 
 	defer os.Remove(binFile.Name())
 	defer binFile.Close()
 
-	linkPath, err := installBinary(options.baseDir, owner, repo, release.TagName, binName, binFile)
+	linkPath, err := installBinary(options.baseDir, owner, repo, tag, binName, binFile)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: installing: %v\n", err)
-		os.Exit(1)
+		return "", fmt.Errorf("installing: %w", err)
 	}
 
-	fmt.Printf("installed %s (%s) → %s\n", repo, release.TagName, linkPath)
+	return linkPath, nil
+}
+
+func downloadAndVerify(asset Asset, maxAssetSize int64) (*os.File, error) {
+	tmp, err := download(asset.BrowserDownloadURL, asset.Size, maxAssetSize)
+	if err != nil {
+		return nil, fmt.Errorf("downloading: %w", err)
+	}
+
+	if err := verifyAssetDigest(asset, tmp, os.Stderr); err != nil {
+		os.Remove(tmp.Name())
+		tmp.Close()
+		return nil, fmt.Errorf("verifying checksum: %w", err)
+	}
+
+	return tmp, nil
+}
+
+func printAvailableAssets(assets []Asset) {
+	fmt.Fprintln(os.Stderr, "available assets:")
+	for _, a := range assets {
+		fmt.Fprintf(os.Stderr, "  %s\n", a.Name)
+	}
 }
 
 func isHealthyInstallDir(installDir string) (bool, error) {

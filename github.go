@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"sort"
 	"strings"
 	"time"
 )
@@ -47,21 +46,12 @@ const (
 	authScopeDownload
 )
 
-var downloadAuthHosts = map[string]struct{}{
-	"api.github.com":                        {},
-	"github.com":                            {},
-	"objects.githubusercontent.com":         {},
-	"release-assets.githubusercontent.com":  {},
-	"github-releases.githubusercontent.com": {},
-}
-
-func attachGitHubToken(req *http.Request, scope authScope) {
-	token := os.Getenv("GITHUB_TOKEN")
-	if token == "" || !allowsGitHubToken(req.URL, scope) {
-		return
-	}
-
-	req.Header.Set("Authorization", "Bearer "+token)
+var downloadAuthHosts = map[string]bool{
+	"api.github.com":                        true,
+	"github.com":                            true,
+	"objects.githubusercontent.com":         true,
+	"release-assets.githubusercontent.com":  true,
+	"github-releases.githubusercontent.com": true,
 }
 
 func allowsGitHubToken(u *url.URL, scope authScope) bool {
@@ -74,8 +64,7 @@ func allowsGitHubToken(u *url.URL, scope authScope) bool {
 	case authScopeAPI:
 		return host == "api.github.com"
 	case authScopeDownload:
-		_, ok := downloadAuthHosts[host]
-		return ok
+		return downloadAuthHosts[host]
 	default:
 		return false
 	}
@@ -89,23 +78,14 @@ func fetchRelease(owner, repo, tag string) (Release, error) {
 		endpoint = fmt.Sprintf("%s/repos/%s/%s/releases/tags/%s", apiBase, ownerPath, repoPath, url.PathEscape(tag))
 	}
 
-	req, err := http.NewRequest("GET", endpoint, nil)
-	if err != nil {
-		return Release{}, err
-	}
-
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	attachGitHubToken(req, authScopeAPI)
-
-	resp, err := httpClient.Do(req)
+	resp, err := getGitHub(http.MethodGet, endpoint, authScopeAPI)
 	if err != nil {
 		return Release{}, err
 	}
 
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 404 {
+	if resp.StatusCode == http.StatusNotFound {
 		if tag == "" {
 			return Release{}, fmt.Errorf("latest release not found for %s/%s", owner, repo)
 		}
@@ -113,7 +93,7 @@ func fetchRelease(owner, repo, tag string) (Release, error) {
 		return Release{}, fmt.Errorf("release not found for %s/%s@%s", owner, repo, tag)
 	}
 
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		return Release{}, fmt.Errorf("GitHub API returned %d", resp.StatusCode)
 	}
 
@@ -136,24 +116,23 @@ func selectAsset(assets []Asset, goos, goarch string) (Asset, error) {
 		return Asset{}, fmt.Errorf("unsupported architecture: %s", goarch)
 	}
 
-	var candidates []Asset
+	var best Asset
+	bestFound := false
 	for _, a := range assets {
 		lower := strings.ToLower(a.Name)
 		if matchesAny(lower, osPhrases) && matchesAny(lower, archPhrases) && isArchive(lower) {
-			candidates = append(candidates, a)
+			if !bestFound || len(a.Name) < len(best.Name) {
+				best = a
+				bestFound = true
+			}
 		}
 	}
 
-	if len(candidates) == 0 {
+	if !bestFound {
 		return Asset{}, fmt.Errorf("no asset found for %s/%s", goos, goarch)
 	}
 
-	// Shortest name wins — naturally excludes .sha256, .sbom, etc.
-	sort.Slice(candidates, func(i, j int) bool {
-		return len(candidates[i].Name) < len(candidates[j].Name)
-	})
-
-	return candidates[0], nil
+	return best, nil
 }
 
 func parseTarget(s string) (owner, repo, tag string, err error) {
@@ -192,4 +171,21 @@ func matchesAny(s string, phrases []string) bool {
 	}
 
 	return false
+}
+
+func getGitHub(method, endpoint string, scope authScope) (*http.Response, error) {
+	req, err := http.NewRequest(method, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	token := os.Getenv("GITHUB_TOKEN")
+	if token != "" && allowsGitHubToken(req.URL, scope) {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	return httpClient.Do(req)
 }
