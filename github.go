@@ -10,6 +10,20 @@ import (
 	"time"
 )
 
+var (
+	archiveExts = []string{".tar.gz", ".tgz", ".tar.bz2", ".tar.xz", ".tar.zst", ".zip", ".zst"}
+	apiBase     = "https://api.github.com"
+	httpClient  = &http.Client{Timeout: 30 * time.Second}
+
+	downloadAuthHosts = map[string]bool{
+		"api.github.com":                        true,
+		"github.com":                            true,
+		"objects.githubusercontent.com":         true,
+		"release-assets.githubusercontent.com":  true,
+		"github-releases.githubusercontent.com": true,
+	}
+)
+
 type Release struct {
 	TagName string  `json:"tag_name"`
 	Assets  []Asset `json:"assets"`
@@ -34,26 +48,12 @@ var archAliases = map[string][]string{
 	"386":   {"386", "i386", "i686"},
 }
 
-var archiveExts = []string{".tar.gz", ".tgz", ".tar.bz2", ".tar.xz", ".tar.zst", ".zip", ".zst"}
-
-var apiBase = "https://api.github.com"
-
-var httpClient = &http.Client{Timeout: 30 * time.Second}
-
 type authScope int
 
 const (
 	authScopeAPI authScope = iota
 	authScopeDownload
 )
-
-var downloadAuthHosts = map[string]bool{
-	"api.github.com":                        true,
-	"github.com":                            true,
-	"objects.githubusercontent.com":         true,
-	"release-assets.githubusercontent.com":  true,
-	"github-releases.githubusercontent.com": true,
-}
 
 func allowsGitHubToken(u *url.URL, scope authScope) bool {
 	if u == nil || !strings.EqualFold(u.Scheme, "https") {
