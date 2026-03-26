@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/ulikunitz/xz"
 )
 
@@ -39,6 +40,15 @@ func extractBinary(f *os.File, assetName string, maxBytes int64) (string, *os.Fi
 
 		return findInTar(tar.NewReader(xzr), maxBytes)
 
+	case strings.HasSuffix(lower, ".tar.zst"):
+		zr, err := zstd.NewReader(f)
+		if err != nil {
+			return "", nil, err
+		}
+
+		defer zr.Close()
+		return findInTar(tar.NewReader(zr), maxBytes)
+
 	case strings.HasSuffix(lower, ".zip"):
 		info, err := f.Stat()
 		if err != nil {
@@ -46,6 +56,21 @@ func extractBinary(f *os.File, assetName string, maxBytes int64) (string, *os.Fi
 		}
 
 		return findInZip(f, info.Size(), maxBytes)
+
+	case strings.HasSuffix(lower, ".zst"):
+		zr, err := zstd.NewReader(f)
+		if err != nil {
+			return "", nil, err
+		}
+
+		defer zr.Close()
+
+		tmp, err := writeTempFile(zr, maxBytes)
+		if err != nil {
+			return "", nil, err
+		}
+
+		return strings.TrimSuffix(filepath.Base(assetName), ".zst"), tmp, nil
 	}
 
 	if err := validateFileSize(f, maxBytes); err != nil {

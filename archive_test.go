@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/ulikunitz/xz"
 )
 
@@ -172,6 +173,46 @@ func buildTarXz(files []struct {
 	return buf.Bytes(), nil
 }
 
+func buildTarZst(files []struct {
+	name string
+	mode int64
+	body []byte
+}) ([]byte, error) {
+	buf := &bytes.Buffer{}
+	zw, err := zstd.NewWriter(buf)
+	if err != nil {
+		return nil, err
+	}
+
+	tw := tar.NewWriter(zw)
+	for _, f := range files {
+		hdr := &tar.Header{
+			Name:     f.name,
+			Typeflag: tar.TypeReg,
+			Mode:     f.mode,
+			Size:     int64(len(f.body)),
+		}
+
+		if err := tw.WriteHeader(hdr); err != nil {
+			return nil, err
+		}
+
+		if _, err := tw.Write(f.body); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := tw.Close(); err != nil {
+		return nil, err
+	}
+
+	if err := zw.Close(); err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
+
 func TestFindInZip(t *testing.T) {
 	// Exec bit set → returned.
 	data, err := buildZip([]struct {
@@ -276,6 +317,93 @@ func TestExtractBinaryTarXz(t *testing.T) {
 	defer archive.Close()
 
 	name, tmp, err := extractBinary(archive, "tool.tar.xz", 1<<20)
+	if err != nil {
+		t.Fatalf("extractBinary: unexpected error: %v", err)
+	}
+
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+
+	if name != "tool" {
+		t.Fatalf("extractBinary name = %q, want %q", name, "tool")
+	}
+
+	got, err := io.ReadAll(tmp)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+
+	if !bytes.Equal(got, content) {
+		t.Fatalf("extractBinary content mismatch: got %q, want %q", got, content)
+	}
+}
+
+func TestExtractBinaryTarZst(t *testing.T) {
+	content := []byte("#!/bin/sh\necho zstd")
+	data, err := buildTarZst([]struct {
+		name string
+		mode int64
+		body []byte
+	}{{"tool", 0755, content}})
+	if err != nil {
+		t.Fatalf("buildTarZst: %v", err)
+	}
+
+	archive, err := writeTempFile(bytes.NewReader(data), 1<<20)
+	if err != nil {
+		t.Fatalf("writeTempFile: %v", err)
+	}
+
+	defer os.Remove(archive.Name())
+	defer archive.Close()
+
+	name, tmp, err := extractBinary(archive, "tool.tar.zst", 1<<20)
+	if err != nil {
+		t.Fatalf("extractBinary: unexpected error: %v", err)
+	}
+
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+
+	if name != "tool" {
+		t.Fatalf("extractBinary name = %q, want %q", name, "tool")
+	}
+
+	got, err := io.ReadAll(tmp)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+
+	if !bytes.Equal(got, content) {
+		t.Fatalf("extractBinary content mismatch: got %q, want %q", got, content)
+	}
+}
+
+func TestExtractBinaryZst(t *testing.T) {
+	content := []byte("#!/bin/sh\necho zstd")
+	buf := &bytes.Buffer{}
+	zw, err := zstd.NewWriter(buf)
+	if err != nil {
+		t.Fatalf("zstd.NewWriter: %v", err)
+	}
+
+	if _, err := zw.Write(content); err != nil {
+		t.Fatalf("zstd.Write: %v", err)
+	}
+
+	if err := zw.Close(); err != nil {
+		t.Fatalf("zstd.Close: %v", err)
+	}
+
+	archive, err := writeTempFile(bytes.NewReader(buf.Bytes()), 1<<20)
+	if err != nil {
+		t.Fatalf("writeTempFile: %v", err)
+	}
+
+	defer os.Remove(archive.Name())
+	defer archive.Close()
+
+	name, tmp, err := extractBinary(archive, "tool.zst", 1<<20)
 	if err != nil {
 		t.Fatalf("extractBinary: unexpected error: %v", err)
 	}

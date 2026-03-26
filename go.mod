@@ -10,6 +10,8 @@ tool (
 
 require github.com/ulikunitz/xz v0.5.15
 
+require github.com/klauspost/compress v1.18.4
+
 require (
 	github.com/BurntSushi/toml v1.4.1-0.20240526193622-a339e1f7089c // indirect
 	github.com/Masterminds/semver v1.5.0 // indirect
