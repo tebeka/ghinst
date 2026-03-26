@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"strconv"
 	"strings"
+	"time"
 )
 
 var options struct {
@@ -17,7 +19,8 @@ var options struct {
 	force       bool
 	baseDir     string
 	completion  string
-	maxSizeMiB  int64
+	maxSize     byteSize
+	httpTimeout time.Duration
 }
 
 const (
@@ -49,7 +52,9 @@ func registerFlags(fs *flag.FlagSet) {
 	fs.BoolVar(&options.list, "list", false, "list installed apps")
 	fs.BoolVar(&options.force, "force", false, "install even if already on the latest version")
 	fs.StringVar(&options.baseDir, "dir", defaultBaseDir(), "base install directory (overrides GHINST_DIR)")
-	fs.Int64Var(&options.maxSizeMiB, "max-size", defaultMaxAssetSizeMiB, "maximum downloaded asset size in MiB")
+	options.maxSize = byteSize(defaultMaxAssetSizeMiB * mib)
+	fs.Var(&options.maxSize, "max-size", "maximum downloaded asset size in bytes (supports kb, mb, gb suffixes)")
+	fs.DurationVar(&options.httpTimeout, "http-timeout", httpClient.Timeout, "HTTP timeout (supports time.ParseDuration formats)")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: %s owner/repo[@version]\n", filepath.Base(os.Args[0]))
 		fs.PrintDefaults()
@@ -118,9 +123,15 @@ func validateOptions() error {
 		return fmt.Errorf("could not determine install base dir; set -dir or GHINST_DIR")
 	}
 
-	if options.maxSizeMiB <= 0 {
+	if options.maxSize <= 0 {
 		return fmt.Errorf("-max-size must be greater than 0")
 	}
+
+	if options.httpTimeout <= 0 {
+		return fmt.Errorf("-http-timeout must be greater than 0")
+	}
+
+	httpClient.Timeout = options.httpTimeout
 
 	return nil
 }
@@ -179,7 +190,7 @@ func ensureInstallNeeded(owner, repo, tag string) (bool, error) {
 }
 
 func installReleaseAsset(owner, repo, tag string, asset Asset) (string, error) {
-	maxAssetSize := options.maxSizeMiB * mib
+	maxAssetSize := int64(options.maxSize)
 	tmp, err := downloadAndVerify(asset, maxAssetSize)
 	if err != nil {
 		return "", err
@@ -203,6 +214,69 @@ func installReleaseAsset(owner, repo, tag string, asset Asset) (string, error) {
 	}
 
 	return linkPath, nil
+}
+
+type byteSize int64
+
+func (s *byteSize) Set(value string) error {
+	size, err := parseByteSize(value)
+	if err != nil {
+		return err
+	}
+
+	*s = byteSize(size)
+	return nil
+}
+
+func (s *byteSize) String() string {
+	if s == nil || *s == 0 {
+		return "0"
+	}
+
+	size := int64(*s)
+	if size%mib == 0 {
+		return strconv.FormatInt(size/mib, 10) + "mb"
+	}
+
+	return strconv.FormatInt(size, 10) + "b"
+}
+
+func parseByteSize(value string) (int64, error) {
+	raw := strings.TrimSpace(value)
+	if raw == "" {
+		return 0, fmt.Errorf("invalid size %q", value)
+	}
+
+	for _, unit := range []struct {
+		suffix string
+		scale  int64
+	}{
+		{"kib", 1 << 10},
+		{"kb", 1 << 10},
+		{"mib", mib},
+		{"mb", mib},
+		{"gib", 1 << 30},
+		{"gb", 1 << 30},
+		{"b", 1},
+	} {
+		if !strings.HasSuffix(strings.ToLower(raw), unit.suffix) {
+			continue
+		}
+
+		n, err := strconv.ParseInt(strings.TrimSpace(raw[:len(raw)-len(unit.suffix)]), 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid size %q", value)
+		}
+
+		return n * unit.scale, nil
+	}
+
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid size %q", value)
+	}
+
+	return n, nil
 }
 
 func downloadAndVerify(asset Asset, maxAssetSize int64) (*os.File, error) {

@@ -34,9 +34,10 @@ var archAliases = map[string][]string{
 	"386":   {"386", "i386", "i686"},
 }
 
-var archiveExts = []string{".tar.gz", ".tgz", ".tar.bz2", ".tar.xz", ".zip"}
+var archiveExts = []string{".tar.gz", ".tgz", ".tar.bz2", ".tar.xz", ".tar.zst", ".zip", ".zst"}
 
 var apiBase = "https://api.github.com"
+
 var httpClient = &http.Client{Timeout: 30 * time.Second}
 
 type authScope int

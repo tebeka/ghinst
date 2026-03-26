@@ -10,6 +10,9 @@ _ghinst() {
         -max-size)
             return
             ;;
+        -http-timeout)
+            return
+            ;;
         -completion)
             COMPREPLY=($(compgen -W "bash zsh fish" -- "$cur"))
             return
@@ -17,7 +20,7 @@ _ghinst() {
     esac
 
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "-completion -version -purge -list -force -dir -max-size" -- "$cur"))
+        COMPREPLY=($(compgen -W "-completion -version -purge -list -force -dir -max-size -http-timeout" -- "$cur"))
         return
     fi
 }

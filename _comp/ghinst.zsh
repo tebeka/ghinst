@@ -8,7 +8,8 @@ _ghinst() {
         '-list[list installed apps]' \
         '-force[install even if already on the latest version]' \
         '-dir[base install directory]:directory:_files -/' \
-        '-max-size[maximum downloaded asset size in MiB]:size (MiB):' \
+        '-max-size[maximum downloaded asset size in bytes; supports kb, mb, gb suffixes]:size:' \
+        '-http-timeout[HTTP timeout; supports time.ParseDuration formats]:duration:' \
         '::owner/repo[@version]:'
 }
 
