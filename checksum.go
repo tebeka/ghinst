@@ -7,12 +7,13 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"os"
 	"strings"
 )
 
-func verifyAssetDigest(asset Asset, r io.Reader, warnings io.Writer) error {
+func verifyAssetDigest(asset Asset, r io.Reader) error {
 	if asset.Digest == "" {
-		fmt.Fprintf(warnings, "warning: no checksum available for %s; skipping verification\n", asset.Name)
+		fmt.Fprintf(os.Stderr, "warning: no checksum available for %s; skipping verification\n", asset.Name)
 		return nil
 	}
 

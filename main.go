@@ -294,7 +294,7 @@ func downloadAndVerify(asset Asset, maxAssetSize int64) (*os.File, error) {
 		return nil, fmt.Errorf("preparing checksum verification: %w", err)
 	}
 
-	if err := verifyAssetDigest(asset, tmp, os.Stderr); err != nil {
+	if err := verifyAssetDigest(asset, tmp); err != nil {
 		os.Remove(tmp.Name())
 		tmp.Close()
 		return nil, fmt.Errorf("verifying checksum: %w", err)

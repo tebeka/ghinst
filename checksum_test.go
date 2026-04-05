@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
+	"os"
 	"strings"
 	"testing"
 )
@@ -17,14 +18,48 @@ func TestVerifyAssetDigestWarnsWhenMissing(t *testing.T) {
 
 	defer f.Close()
 
-	var warnings bytes.Buffer
-	if err := verifyAssetDigest(Asset{Name: "tool.tar.gz"}, f, &warnings); err != nil {
-		t.Fatalf("verifyAssetDigest: unexpected error: %v", err)
-	}
+	warnings := captureStderr(t, func() {
+		if err := verifyAssetDigest(Asset{Name: "tool.tar.gz"}, f); err != nil {
+			t.Fatalf("verifyAssetDigest: unexpected error: %v", err)
+		}
+	})
 
-	if got := warnings.String(); !strings.Contains(got, "warning: no checksum available") {
+	if got := warnings; !strings.Contains(got, "warning: no checksum available") {
 		t.Fatalf("warning output = %q, want missing-checksum warning", got)
 	}
+}
+
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+
+	orig := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+
+	os.Stderr = w
+	defer func() { os.Stderr = orig }()
+	defer r.Close()
+
+	done := make(chan string, 1)
+	go func() {
+		var buf bytes.Buffer
+		if _, err := io.Copy(&buf, r); err != nil {
+			done <- "copy error: " + err.Error()
+			return
+		}
+
+		done <- buf.String()
+	}()
+
+	fn()
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("close pipe writer: %v", err)
+	}
+
+	return <-done
 }
 
 func TestVerifyAssetDigestAcceptsMatchingSHA256(t *testing.T) {
@@ -42,7 +77,7 @@ func TestVerifyAssetDigestAcceptsMatchingSHA256(t *testing.T) {
 		Name:   "tool.tar.gz",
 		Digest: "sha256:" + hex.EncodeToString(sum[:]),
 	}
-	if err := verifyAssetDigest(asset, f, &bytes.Buffer{}); err != nil {
+	if err := verifyAssetDigest(asset, f); err != nil {
 		t.Fatalf("verifyAssetDigest: unexpected error: %v", err)
 	}
 
@@ -71,7 +106,7 @@ func TestVerifyAssetDigestRejectsMismatch(t *testing.T) {
 	err = verifyAssetDigest(Asset{
 		Name:   "tool.tar.gz",
 		Digest: "sha256:" + strings.Repeat("0", 64),
-	}, f, &bytes.Buffer{})
+	}, f)
 	if err == nil {
 		t.Fatal("verifyAssetDigest expected checksum mismatch")
 	}
@@ -92,7 +127,7 @@ func TestVerifyAssetDigestRejectsUnsupportedAlgorithm(t *testing.T) {
 	err = verifyAssetDigest(Asset{
 		Name:   "tool.tar.gz",
 		Digest: "sha512:" + strings.Repeat("0", 128),
-	}, f, &bytes.Buffer{})
+	}, f)
 	if err == nil {
 		t.Fatal("verifyAssetDigest expected unsupported algorithm error")
 	}
@@ -113,7 +148,7 @@ func TestVerifyAssetDigestRejectsInvalidDigestFormat(t *testing.T) {
 	err = verifyAssetDigest(Asset{
 		Name:   "tool.tar.gz",
 		Digest: "sha256-not-a-real-digest",
-	}, f, &bytes.Buffer{})
+	}, f)
 	if err == nil {
 		t.Fatal("verifyAssetDigest expected invalid digest error")
 	}
