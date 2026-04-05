@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
-	"os"
 	"strings"
 	"testing"
 )
@@ -47,9 +46,13 @@ func TestVerifyAssetDigestAcceptsMatchingSHA256(t *testing.T) {
 		t.Fatalf("verifyAssetDigest: unexpected error: %v", err)
 	}
 
-	got, err := readAllAndRewind(f)
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		t.Fatalf("Seek: %v", err)
+	}
+
+	got, err := io.ReadAll(f)
 	if err != nil {
-		t.Fatalf("readAllAndRewind: %v", err)
+		t.Fatalf("ReadAll: %v", err)
 	}
 
 	if !bytes.Equal(got, data) {
@@ -118,18 +121,4 @@ func TestVerifyAssetDigestRejectsInvalidDigestFormat(t *testing.T) {
 	if !strings.Contains(err.Error(), "invalid asset digest") {
 		t.Fatalf("unexpected error: %v", err)
 	}
-}
-
-func readAllAndRewind(f *os.File) ([]byte, error) {
-	if _, err := f.Seek(0, 0); err != nil {
-		return nil, err
-	}
-
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = f.Seek(0, 0)
-	return data, err
 }

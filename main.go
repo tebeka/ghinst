@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -287,10 +288,22 @@ func downloadAndVerify(asset Asset, maxAssetSize int64) (*os.File, error) {
 		return nil, fmt.Errorf("downloading: %w", err)
 	}
 
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		os.Remove(tmp.Name())
+		tmp.Close()
+		return nil, fmt.Errorf("preparing checksum verification: %w", err)
+	}
+
 	if err := verifyAssetDigest(asset, tmp, os.Stderr); err != nil {
 		os.Remove(tmp.Name())
 		tmp.Close()
 		return nil, fmt.Errorf("verifying checksum: %w", err)
+	}
+
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		os.Remove(tmp.Name())
+		tmp.Close()
+		return nil, fmt.Errorf("preparing downloaded asset: %w", err)
 	}
 
 	return tmp, nil

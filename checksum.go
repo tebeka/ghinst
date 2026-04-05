@@ -7,11 +7,10 @@ import (
 	"fmt"
 	"hash"
 	"io"
-	"os"
 	"strings"
 )
 
-func verifyAssetDigest(asset Asset, f *os.File, warnings io.Writer) error {
+func verifyAssetDigest(asset Asset, r io.Reader, warnings io.Writer) error {
 	if asset.Digest == "" {
 		fmt.Fprintf(warnings, "warning: no checksum available for %s; skipping verification\n", asset.Name)
 		return nil
@@ -35,7 +34,7 @@ func verifyAssetDigest(asset Asset, f *os.File, warnings io.Writer) error {
 		return fmt.Errorf("invalid asset digest %q: %w", asset.Digest, err)
 	}
 
-	if err := hashFile(f, h); err != nil {
+	if err := hashReader(r, h); err != nil {
 		return err
 	}
 
@@ -47,16 +46,11 @@ func verifyAssetDigest(asset Asset, f *os.File, warnings io.Writer) error {
 	return nil
 }
 
-func hashFile(f *os.File, h hash.Hash) error {
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return err
-	}
-
+func hashReader(r io.Reader, h hash.Hash) error {
 	h.Reset()
-	if _, err := io.Copy(h, f); err != nil {
+	if _, err := io.Copy(h, r); err != nil {
 		return err
 	}
 
-	_, err := f.Seek(0, io.SeekStart)
-	return err
+	return nil
 }

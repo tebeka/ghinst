@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -183,6 +185,41 @@ func TestDownloadRejectsResponseBodyOverLimit(t *testing.T) {
 
 	if !strings.Contains(err.Error(), "exceeds limit") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDownloadAndVerifyRewindsDownloadedFile(t *testing.T) {
+	want := []byte("hello from server")
+	sum := sha256.Sum256(want)
+	asset := Asset{
+		Name:               "tool.tar.gz",
+		BrowserDownloadURL: "",
+		Digest:             "sha256:" + hex.EncodeToString(sum[:]),
+		Size:               int64(len(want)),
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(want)
+	}))
+	defer srv.Close()
+
+	asset.BrowserDownloadURL = srv.URL
+
+	tmp, err := downloadAndVerify(asset, 1<<20)
+	if err != nil {
+		t.Fatalf("downloadAndVerify: unexpected error: %v", err)
+	}
+
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+
+	got, err := io.ReadAll(tmp)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+
+	if !bytes.Equal(got, want) {
+		t.Fatalf("downloaded content = %q, want %q", got, want)
 	}
 }
 

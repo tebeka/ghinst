@@ -36,7 +36,7 @@ func download(url string, expectedSize, maxBytes int64) (*os.File, error) {
 
 // installBinary places the binary under <baseDir>/ghinst/owner/repo@tag/
 // and symlinks it into <baseDir>/bin/.
-func installBinary(baseDir, owner, repo, tag, binName string, src *os.File) (_ string, err error) {
+func installBinary(baseDir, owner, repo, tag, binName string, src io.Reader) (_ string, err error) {
 	installDir, _, err := managedInstallDir(baseDir, owner, repo, tag)
 	if err != nil {
 		return "", err
