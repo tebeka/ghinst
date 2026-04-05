@@ -152,3 +152,11 @@ func TestValidateOptionsUpdatesHTTPClientTimeout(t *testing.T) {
 		t.Fatalf("httpClient.Timeout = %v, want %v", httpClient.Timeout, options.httpTimeout)
 	}
 }
+
+func TestExtractedBinarySizeLimitMatchesConfiguredMaxSize(t *testing.T) {
+	for _, maxSize := range []int64{5 * mib, 200 * mib} {
+		if got := extractedBinarySizeLimit(maxSize); got != maxSize {
+			t.Fatalf("extractedBinarySizeLimit(%d) = %d, want %d", maxSize, got, maxSize)
+		}
+	}
+}

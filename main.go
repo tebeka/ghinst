@@ -24,9 +24,8 @@ var options struct {
 }
 
 const (
-	defaultMaxAssetSizeMiB       int64 = 200
-	defaultMaxExtractedSizeBytes int64 = 100 << 20
-	mib                          int64 = 1 << 20
+	defaultMaxAssetSizeMiB int64 = 200
+	mib                    int64 = 1 << 20
 )
 
 func buildVersion() string {
@@ -53,7 +52,7 @@ func registerFlags(fs *flag.FlagSet) {
 	fs.BoolVar(&options.force, "force", false, "install even if already on the latest version")
 	fs.StringVar(&options.baseDir, "dir", defaultBaseDir(), "base install directory (overrides GHINST_DIR)")
 	options.maxSize = byteSize(defaultMaxAssetSizeMiB * mib)
-	fs.Var(&options.maxSize, "max-size", "maximum downloaded asset size in bytes (supports kb, mb, gb suffixes)")
+	fs.Var(&options.maxSize, "max-size", "maximum asset or extracted binary size in bytes (supports kb, mb, gb suffixes)")
 	fs.DurationVar(&options.httpTimeout, "http-timeout", httpClient.Timeout, "HTTP timeout (supports time.ParseDuration formats)")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: %s owner/repo[@version]\n", filepath.Base(os.Args[0]))
@@ -199,8 +198,7 @@ func installReleaseAsset(owner, repo, tag string, asset Asset) (string, error) {
 	defer os.Remove(tmp.Name())
 	defer tmp.Close()
 
-	maxExtractedSize := min(defaultMaxExtractedSizeBytes, maxAssetSize)
-	binName, binFile, err := extractBinary(tmp, asset.Name, maxExtractedSize)
+	binName, binFile, err := extractBinary(tmp, asset.Name, extractedBinarySizeLimit(maxAssetSize))
 	if err != nil {
 		return "", fmt.Errorf("extracting: %w", err)
 	}
@@ -214,6 +212,10 @@ func installReleaseAsset(owner, repo, tag string, asset Asset) (string, error) {
 	}
 
 	return linkPath, nil
+}
+
+func extractedBinarySizeLimit(maxAssetSize int64) int64 {
+	return maxAssetSize
 }
 
 type byteSize int64

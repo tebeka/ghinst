@@ -32,7 +32,7 @@ ghinst junegunn/fzf@v0.54.0
 
 You can change the installation directory location by setting the `GHINST_DIR` environment variable.
 
-By default, downloads are limited to `200 MiB`, and extracted binaries are limited to `100 MiB`. Use `-max-size` to lower or raise the download limit. Values without a suffix are treated as bytes, and you can also use suffixes such as `kb`, `mb`, or `gb`:
+By default, assets and extracted binaries are limited to `200 MiB`. Use `-max-size` to lower or raise that limit. Values without a suffix are treated as bytes, and you can also use suffixes such as `kb`, `mb`, or `gb`:
 
 ```
 ghinst -max-size 314572800 owner/repo

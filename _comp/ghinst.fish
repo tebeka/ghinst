@@ -6,5 +6,5 @@ complete -c ghinst -o purge      -d 'Remove all but the currently used version o
 complete -c ghinst -o list       -d 'List installed apps'
 complete -c ghinst -o force      -d 'Install even if already on the latest version'
 complete -c ghinst -o dir        -d 'Base install directory' -r -a '(__fish_complete_directories)'
-complete -c ghinst -o max-size   -d 'Maximum downloaded asset size in bytes; supports kb, mb, gb suffixes' -r
+complete -c ghinst -o max-size   -d 'Maximum asset or extracted binary size in bytes; supports kb, mb, gb suffixes' -r
 complete -c ghinst -o http-timeout -d 'HTTP timeout; supports time.ParseDuration formats' -r
