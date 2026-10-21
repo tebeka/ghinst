@@ -9,7 +9,7 @@ tool (
 )
 
 require (
-	github.com/klauspost/compress v1.18.4
+	github.com/klauspost/compress v1.18.7
 	github.com/ulikunitz/xz v0.5.15
 )
 
